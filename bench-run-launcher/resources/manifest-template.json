@@ -1,0 +1,48 @@
+{
+    "run_name": "<benchmark>-<model_short>-<env>-<YYYYMMDD-HHMMSS>",
+    "requested_at": "<ISO8601 when user asked for the run>",
+    "launched_at": "<ISO8601 when harbor run command was executed>",
+    "cwd": "<harbor working directory>",
+    "git_branch": "<harbor repo branch>",
+    "git_commit": "<harbor repo HEAD commit hash>",
+    "benchmark": "<swebench|terminalbench>",
+    "dataset": "<dataset flag, e.g. swebench-verified@1.0>",
+    "environment": "<modal|docker>",
+    "agent": "<agent name, e.g. cline-cli>",
+    "model": "<full model string, e.g. openrouter:moonshotai/kimi-k2.5>",
+    "task_limit": "<number of tasks (-l flag)>",
+    "concurrency": "<number of concurrent tasks (-n flag)>",
+    "agent_kwargs": {
+        "timeout": 1000,
+        "reasoning-effort": "none",
+        "max-consecutive-mistakes": 15,
+        "double-check-completion": false,
+        "tarball_url": "<tarball URL used in --ak>"
+    },
+    "tarball": {
+        "source_mode": "<build_and_upload|local_tarball|existing_url>",
+        "tarball_url": "<URL used in --ak tarball_url>",
+        "local_path": "<local .tgz path or null>",
+        "sha1": "<SHA1 checksum or null if unknown>",
+        "size_bytes": "<file size in bytes or null if unknown>",
+        "s3_uri": "<s3://... URI or null>",
+        "sdk_branch": "<SDK repo branch the tarball was built from, or null>",
+        "sdk_commit": "<SDK repo commit hash, or null>",
+        "prs_included": [
+            "<list of PR descriptions included in this build, or omit if none>"
+        ]
+    },
+    "launch_command": "<full nohup harbor run ... command>",
+    "pid": "<process ID from echo $!>",
+    "log_file": "<absolute path to .log file>",
+    "watcher": {
+        "watch_command": "bash <skill_resources_dir>/watch-job.sh <job_dir>",
+        "watch_loop_command": "watch -n 15 'bash <skill_resources_dir>/watch-job.sh <job_dir>'",
+        "cancel_command": "kill <pid>"
+    },
+    "comparison_runs": {
+        "<label>": "<run_name of related run for comparison, or omit section if none>"
+    },
+    "notes": "<free-text description of what this run is testing>",
+    "status": "launched"
+}

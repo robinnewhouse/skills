@@ -1,0 +1,7 @@
+interface:
+  display_name: "File Architecture X-Ray"
+  short_description: "Interactive file-explainer webpages"
+  default_prompt: "Use $file-architecture-xray to turn a source file into a self-contained HTML architecture explainer."
+
+policy:
+  allow_implicit_invocation: true
