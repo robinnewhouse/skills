@@ -4,6 +4,23 @@ import html
 import json
 from pathlib import Path
 
+# ── Geometry constants for callout line-anchoring ──────────────────────────
+# These MUST match the rendered CSS geometry of the code panel.
+# Callout top = CODE_HEADER_HEIGHT + CODE_BODY_PADDING_TOP + (line - zone_start) * CODE_ROW_HEIGHT
+#
+# If you change .code-header padding, .code border, .code-line min-height,
+# or <pre> padding in the CSS template below, update these values to match.
+#
+# CRITICAL: code line divs are joined with "" (no separator) and the <pre>
+# tag must contain NO whitespace around the content. Inside <pre>, any stray
+# newline renders as a visible ~15px line break, destroying all anchoring.
+# ───────────────────────────────────────────────────────────────────────────
+CODE_ROW_HEIGHT = 20           # .code-line min-height (px)
+CODE_BODY_PADDING_TOP = 18     # <pre> padding-top (px)
+CODE_BODY_PADDING_BOTTOM = 18  # <pre> padding-bottom (px)
+CODE_HEADER_HEIGHT = 40        # .code border-top (1) + .code-header (12+~15+12) + border-bottom (1) ≈ 40px
+CALLOUT_GAP = 14
+
 
 def read_spec(path: Path) -> dict:
     return json.loads(path.read_text())
@@ -11,6 +28,10 @@ def read_spec(path: Path) -> dict:
 
 def read_lines(path: Path) -> list[str]:
     return path.read_text().splitlines()
+
+
+def count_lines(path: Path) -> int:
+    return len(read_lines(path))
 
 
 def render_code_excerpt(path: Path, start: int, end: int) -> str:
@@ -21,13 +42,37 @@ def render_code_excerpt(path: Path, start: int, end: int) -> str:
     for lineno in range(start, end + 1):
         text = html.escape(lines[lineno - 1])
         rendered.append(
-            f'<div class="code-line"><span class="ln">{lineno}</span><span class="txt">{text}</span></div>'
+            f'<div class="code-line" id="line-{lineno}"><span class="ln">{lineno}</span><span class="txt">{text}</span></div>'
         )
-    return "\n".join(rendered)
+    return "".join(rendered)
 
 
-def count_lines(path: Path) -> int:
-    return len(read_lines(path))
+def render_notes(notes: list[dict]) -> str:
+    items: list[str] = []
+    for note in notes:
+        items.append(
+            f'<div class="note"><strong>{html.escape(note["label"])}</strong>{html.escape(note["body"])}</div>'
+        )
+    return "\n".join(items)
+
+
+def render_intro_chips(chips: list[str]) -> str:
+    return "\n".join(
+        f'<div class="story-chip">{html.escape(chip)}</div>' for chip in chips
+    )
+
+
+def detail_lookup(zones: list[dict]) -> str:
+    payload = {}
+    for zone in zones:
+        payload[zone["id"]] = {
+            "title": zone["title"],
+            "range": zone["range_label"],
+            "body": zone["detail_body"],
+            "input": zone["input"],
+            "output": zone["output"],
+        }
+    return json.dumps(payload)
 
 
 def minimap_segments(zones: list[dict], primary_path: Path, total_lines: int) -> str:
@@ -57,23 +102,26 @@ def diagram_nodes(zones: list[dict]) -> str:
     nodes: list[str] = []
     y = 16
     width = 280
-    height = 72
+    height = 76
     x = 28
     for zone in zones:
         meta = zone.get("meta", [])[:2]
         meta_1 = html.escape(meta[0] if len(meta) > 0 else zone["range_label"])
         meta_2 = html.escape(meta[1] if len(meta) > 1 else "")
-        node = f"""
+        clip_id = f"clip-{html.escape(zone['id'])}"
+        nodes.append(
+            f"""
           <g class="node" data-target="{html.escape(zone["id"])}" transform="translate({x} {y})">
+            <defs><clipPath id="{clip_id}"><rect x="0" y="0" rx="18" ry="18" width="{width}" height="{height}" /></clipPath></defs>
             <rect x="0" y="0" rx="18" ry="18" width="{width}" height="{height}" />
-            <rect x="0" y="0" rx="18" ry="18" width="8" height="{height}" fill="{html.escape(zone["color"])}" stroke="none"></rect>
+            <rect x="0" y="0" width="6" height="{height}" fill="{html.escape(zone["color"])}" stroke="none" clip-path="url(#{clip_id})"></rect>
             <text class="title" x="20" y="28">{html.escape(zone["title"])}</text>
-            <text class="meta" x="20" y="48">{meta_1}</text>
-            <text class="meta" x="20" y="62">{meta_2}</text>
+            <text class="meta" x="20" y="49">{meta_1}</text>
+            <text class="meta" x="20" y="64">{meta_2}</text>
           </g>
-        """
-        nodes.append(node)
-        y += 96
+"""
+        )
+        y += 98
     return "\n".join(nodes)
 
 
@@ -81,43 +129,66 @@ def diagram_wires(zones: list[dict]) -> str:
     wires: list[str] = []
     y = 16
     width = 280
-    height = 72
+    height = 76
     x = 28
-    for index in range(len(zones) - 1):
+    for _ in range(len(zones) - 1):
         x_mid = x + width / 2
         y1 = y + height
-        y2 = y + 96
+        y2 = y + 98
         wires.append(
-            f'<path class="wire" d="M{x_mid} {y1} C{x_mid} {y1 + 10}, {x_mid} {y2 - 20}, {x_mid} {y2 - 8}" />'
+            f'<path class="wire" d="M{x_mid} {y1} C{x_mid} {y1 + 12}, {x_mid} {y2 - 20}, {x_mid} {y2 - 8}" />'
         )
-        y += 96
+        y += 98
     return "\n".join(wires)
 
 
-def detail_lookup(zones: list[dict]) -> str:
-    payload = {}
-    for zone in zones:
-        payload[zone["id"]] = {
-            "title": zone["title"],
-            "range": zone["range_label"],
-            "body": zone["detail_body"],
-            "input": zone["input"],
-            "output": zone["output"],
-        }
-    return json.dumps(payload)
+def render_callouts(zone: dict) -> str:
+    callouts = zone.get("callouts", [])
+    if not callouts:
+        return ""
+
+    start = int(zone["source"]["start"])
+    rendered: list[str] = []
+    for callout in callouts:
+        line = int(callout["line"])
+        # Exact line anchoring within the code block geometry.
+        top = CODE_HEADER_HEIGHT + CODE_BODY_PADDING_TOP + (
+            (line - start) * CODE_ROW_HEIGHT
+        )
+        line_label = callout.get("lines_label") or f"Line {line}"
+        title = callout.get("title")
+        body = callout["body"]
+        rendered.append(
+            f"""
+            <article class="callout-card" style="top:{top:.0f}px;">
+              <div class="callout-line">{html.escape(line_label)}</div>
+              {"<h4>" + html.escape(title) + "</h4>" if title else ""}
+              <p>{html.escape(body)}</p>
+            </article>
+"""
+        )
+    return "\n".join(rendered)
 
 
-def render_notes(notes: list[dict]) -> str:
-    return "\n".join(
-        f'<div class="note"><strong>{html.escape(note["label"])}</strong>{html.escape(note["body"])}</div>'
-        for note in notes
-    )
+def estimate_callout_height(callout: dict) -> int:
+    title = callout.get("title", "")
+    body = callout.get("body", "")
+    chars = len(title) + len(body)
+    text_lines = max(2, (chars // 34) + 1)
+    title_bonus = 26 if title else 0
+    return 58 + title_bonus + (text_lines * 18)
 
 
-def render_intro_chips(chips: list[str]) -> str:
-    return "\n".join(
-        f'<div class="story-chip">{html.escape(chip)}</div>' for chip in chips
-    )
+def estimate_callout_rail_height(zone: dict) -> int:
+    start = int(zone["source"]["start"])
+    end = int(zone["source"]["end"])
+    line_count = max(end - start + 1, 1)
+    code_height = CODE_BODY_PADDING_TOP + CODE_BODY_PADDING_BOTTOM + (line_count * CODE_ROW_HEIGHT)
+    cards_height = 0
+    callouts = zone.get("callouts", [])
+    for callout in callouts:
+        cards_height += estimate_callout_height(callout) + CALLOUT_GAP
+    return max(code_height, cards_height + 24, 260)
 
 
 def render_slices(zones: list[dict]) -> str:
@@ -125,10 +196,17 @@ def render_slices(zones: list[dict]) -> str:
     for zone in zones:
         source = zone["source"]
         source_path = Path(source["path"]).resolve()
-        code_html = render_code_excerpt(
-            source_path,
-            int(source["start"]),
-            int(source["end"]),
+        start = int(source["start"])
+        end = int(source["end"])
+        code_html = render_code_excerpt(source_path, start, end)
+        callouts_html = render_callouts(zone)
+        has_callouts = "true" if zone.get("callouts") else "false"
+        line_count = max(end - start + 1, 1)
+        code_total_height = (
+            CODE_HEADER_HEIGHT
+            + CODE_BODY_PADDING_TOP
+            + CODE_BODY_PADDING_BOTTOM
+            + (line_count * CODE_ROW_HEIGHT)
         )
         rendered.append(
             f"""
@@ -147,11 +225,14 @@ def render_slices(zones: list[dict]) -> str:
         <div class="notes">
           {render_notes(zone.get("notes", []))}
         </div>
-        <div class="code">
-          <div class="code-header"><span class="dot"></span>{html.escape(str(source_path))}</div>
-          <pre>
-{code_html}
-          </pre>
+        <div class="code-shell code-shell-{has_callouts}">
+          <div class="callout-overlay" style="height:{code_total_height}px;">
+            {callouts_html}
+          </div>
+          <div class="code">
+            <div class="code-header"><span class="dot"></span>{html.escape(str(source_path))}</div>
+            <pre>{code_html}</pre>
+          </div>
         </div>
       </div>
     </section>
@@ -168,7 +249,13 @@ def build_html(spec: dict) -> str:
     detail = detail_lookup(zones)
     intro = spec["intro"]
 
-    scale_marks = [1, max(1, total_lines // 4), max(1, total_lines // 2), max(1, (total_lines * 3) // 4), total_lines]
+    scale_marks = [
+        1,
+        max(1, total_lines // 4),
+        max(1, total_lines // 2),
+        max(1, (total_lines * 3) // 4),
+        total_lines,
+    ]
     scale_html = "\n".join(
         f'<span style="top:{(mark - 1) / max(total_lines, 1) * 100:.2f}%;">{mark}</span>'
         for mark in scale_marks
@@ -187,6 +274,7 @@ def build_html(spec: dict) -> str:
     --accent: #d76834;
     --accent-2: #157a6e;
     --accent-3: #2457a5;
+    --surface: rgba(255, 252, 246, 0.96);
     --code-bg: #111827;
     --code-panel: #172033;
     --code-text: #e6edf7;
@@ -213,31 +301,30 @@ def build_html(spec: dict) -> str:
   .right {{ padding: 28px 28px 120px; }}
   .hero, .card, .minimap, .slice {{
     border: 1px solid rgba(109, 101, 93, 0.16);
-    border-radius: 22px; box-shadow: var(--shadow);
+    border-radius: 22px;
+    box-shadow: var(--shadow);
   }}
-  .hero {{ padding: 22px; background: linear-gradient(135deg, rgba(255, 247, 236, 0.98), rgba(255, 252, 246, 0.94)); margin-bottom: 18px; }}
+  .hero {{
+    padding: 22px;
+    background: linear-gradient(135deg, rgba(255, 247, 236, 0.98), rgba(255, 252, 246, 0.94));
+    margin-bottom: 18px;
+  }}
   .eyebrow {{
     display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px;
     background: rgba(36, 87, 165, 0.08); color: var(--accent-3); font-size: 12px; font-weight: 700;
     letter-spacing: 0.08em; text-transform: uppercase;
   }}
-  h1, h2, h3 {{
+  h1, h2, h3, h4 {{
     font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
     letter-spacing: -0.02em;
   }}
-  .hero h1 {{ margin: 14px 0 10px; font-size: 38px; line-height: 1.02; }}
-  .hero p, .card p, .intro p, .slice-head p {{ color: var(--muted); line-height: 1.58; }}
+  .hero h1 {{ margin: 14px 0 10px; font-size: 24px; line-height: 1.15; }}
+  .hero p, .card p, .intro p, .slice-head p, .callout-card p {{ color: var(--muted); line-height: 1.58; }}
   .path {{
     margin-top: 12px; padding: 12px 14px; border-radius: 16px; background: rgba(31, 29, 26, 0.04);
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all;
   }}
-  .controls {{ display: flex; gap: 10px; margin-top: 16px; }}
-  button {{
-    border: 0; border-radius: 14px; padding: 11px 14px; font: inherit; font-size: 14px; cursor: pointer;
-  }}
-  button.primary {{ background: var(--ink); color: #fff8f1; }}
-  button.secondary {{ background: rgba(31, 29, 26, 0.06); color: var(--ink); }}
-  .card, .minimap {{ background: rgba(255, 252, 246, 0.96); padding: 18px; margin-bottom: 18px; }}
+  .card, .minimap {{ background: var(--surface); padding: 18px; margin-bottom: 18px; }}
   .diagram-shell {{ margin-top: 14px; }}
   svg {{ width: 100%; height: auto; display: block; }}
   .wire {{ fill: none; stroke: rgba(31, 29, 26, 0.28); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }}
@@ -279,12 +366,12 @@ def build_html(spec: dict) -> str:
   .legend {{ margin-top: 12px; display: grid; gap: 8px; }}
   .legend-item {{ display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }}
   .legend-swatch {{ width: 14px; height: 14px; border-radius: 999px; }}
-  .intro {{ max-width: 980px; margin-bottom: 22px; }}
-  .intro h2 {{ font-size: 42px; margin: 0 0 10px; }}
+  .intro {{ max-width: 1040px; margin-bottom: 22px; }}
+  .intro h2 {{ font-size: 26px; margin: 0 0 10px; }}
   .story-strip {{ display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }}
   .story-chip {{ padding: 10px 12px; border-radius: 999px; background: rgba(31, 29, 26, 0.06); font-size: 13px; }}
   .slice {{
-    position: relative; overflow: hidden; margin-bottom: 22px;
+    position: relative; overflow: visible; margin-bottom: 22px;
     background: linear-gradient(180deg, rgba(255, 252, 246, 0.97), rgba(255, 248, 239, 0.93));
   }}
   .slice::before {{ content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--slice-color, var(--accent)); }}
@@ -299,8 +386,58 @@ def build_html(spec: dict) -> str:
     font-size: 12px; font-weight: 700; background: rgba(31, 29, 26, 0.06); text-transform: uppercase; letter-spacing: 0.06em;
   }}
   .slice-range {{ background: rgba(36, 87, 165, 0.08); padding: 7px 10px; border-radius: 999px; color: var(--accent-3); }}
-  .slice-body {{ display: grid; grid-template-columns: minmax(240px, 0.42fr) minmax(0, 1fr); gap: 18px; padding: 0 24px 24px; }}
-  .notes {{ display: grid; gap: 12px; align-content: start; }}
+  .slice-body {{ display: grid; grid-template-columns: 1fr; gap: 12px; padding: 0 24px 24px; }}
+  .notes {{
+    display: grid;
+    gap: 10px;
+    align-content: start;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }}
+  .code-shell {{ position: relative; min-width: 0; }}
+  .code-shell-true {{
+    display: grid;
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 0;
+  }}
+  .code-shell-false .callout-overlay {{ display: none; }}
+  .callout-overlay {{
+    position: relative;
+    width: 230px;
+    pointer-events: none;
+    z-index: 2;
+    flex-shrink: 0;
+  }}
+  .callout-card {{
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: auto;
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(255, 250, 243, 0.95);
+    border: 1px solid rgba(109, 101, 93, 0.14);
+    box-shadow: 0 8px 20px rgba(75, 43, 24, 0.07);
+    pointer-events: auto;
+  }}
+  .callout-card::after {{
+    content: "";
+    position: absolute;
+    right: -12px;
+    top: 18px;
+    width: 12px;
+    border-top: 1.5px dashed rgba(36, 87, 165, 0.45);
+  }}
+  .callout-line {{
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-3);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }}
+  .callout-card h4 {{ margin: 0 0 6px; font-size: 18px; }}
+  .callout-card p {{ margin: 0; font-size: 14px; }}
   .code {{
     background: linear-gradient(180deg, var(--code-bg), var(--code-panel)); color: var(--code-text);
     border-radius: 20px; overflow: auto; border: 1px solid rgba(159, 177, 208, 0.16);
@@ -310,9 +447,9 @@ def build_html(spec: dict) -> str:
     font-size: 12px; color: var(--code-dim); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }}
   .dot {{ width: 10px; height: 10px; border-radius: 999px; background: #f59e0b; box-shadow: 16px 0 0 #10b981, 32px 0 0 #3b82f6; margin-right: 30px; }}
-  pre {{ margin: 0; padding: 18px 0; overflow-x: auto; }}
+  pre {{ margin: 0; padding: {CODE_BODY_PADDING_TOP}px 0 {CODE_BODY_PADDING_BOTTOM}px; overflow-x: auto; }}
   .code-line {{
-    display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; padding: 0 18px; line-height: 1.55; white-space: pre;
+    display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; padding: 0 18px; min-height: {CODE_ROW_HEIGHT}px; align-items: center; line-height: 1.45; white-space: pre;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
   }}
   .ln {{ color: #7f92b8; text-align: right; user-select: none; }}
@@ -322,12 +459,26 @@ def build_html(spec: dict) -> str:
     .page {{ grid-template-columns: 1fr; }}
     .left {{ position: static; height: auto; border-right: 0; border-bottom: 1px solid rgba(109, 101, 93, 0.18); }}
   }}
-  @media (max-width: 860px) {{
+  @media (max-width: 940px) {{
     .right {{ padding: 20px 16px 90px; }}
     .left {{ padding: 20px 16px; }}
     .slice-head, .slice-body {{ grid-template-columns: 1fr; }}
     .slice-meta {{ justify-items: start; }}
-    .intro h2 {{ font-size: 34px; }}
+    .intro h2 {{ font-size: 22px; }}
+    .code-shell-true {{ grid-template-columns: 1fr; }}
+    .callout-overlay {{
+      position: static;
+      width: 100%;
+      height: auto !important;
+      display: grid;
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
+    .callout-card {{
+      position: static;
+      width: 100%;
+    }}
+    .callout-card::after {{ display: none; }}
   }}
 </style>
 </head>
@@ -339,17 +490,13 @@ def build_html(spec: dict) -> str:
       <h1>{html.escape(spec["title"])}</h1>
       <p>{html.escape(spec["subtitle"])}</p>
       <div class="path">{html.escape(str(primary_path))}</div>
-      <div class="controls">
-        <button class="primary" id="play">Play the file</button>
-        <button class="secondary" id="jump-first">Jump to first zone</button>
-      </div>
     </section>
 
     <section class="card">
       <h2>Pipeline Diagram</h2>
       <p>Click any node. The right pane jumps to the corresponding architectural slice and code excerpt.</p>
       <div class="diagram-shell">
-        <svg viewBox="0 0 340 {110 + (len(zones) * 96)}" aria-label="file architecture flow diagram">
+        <svg viewBox="0 0 340 {110 + (len(zones) * 98)}" aria-label="file architecture flow diagram">
           {diagram_wires(zones)}
           {diagram_nodes(zones)}
         </svg>
@@ -414,10 +561,7 @@ def build_html(spec: dict) -> str:
   const detailBody = document.getElementById("detail-body");
   const detailIn = document.getElementById("detail-in");
   const detailOut = document.getElementById("detail-out");
-  const playButton = document.getElementById("play");
-  const jumpFirstButton = document.getElementById("jump-first");
-  let activeId = "{html.escape(first_zone["id"])}";
-  let playTimer = null;
+  let activeId = {json.dumps(first_zone["id"])};
 
   function setActive(id) {{
     activeId = id;
@@ -440,33 +584,8 @@ def build_html(spec: dict) -> str:
     setActive(id);
   }}
 
-  function stopPlay() {{
-    if (playTimer) {{
-      clearInterval(playTimer);
-      playTimer = null;
-      playButton.textContent = "Play the file";
-    }}
-  }}
-
-  function startPlay() {{
-    const order = {json.dumps([zone["id"] for zone in zones])};
-    let index = Math.max(0, order.indexOf(activeId));
-    playButton.textContent = "Stop playback";
-    scrollToZone(order[index]);
-    playTimer = setInterval(() => {{
-      index += 1;
-      if (index >= order.length) {{
-        stopPlay();
-        return;
-      }}
-      scrollToZone(order[index]);
-    }}, 2200);
-  }}
-
-  for (const node of nodes) node.addEventListener("click", () => {{ stopPlay(); scrollToZone(node.dataset.target); }});
-  for (const segment of segments) segment.addEventListener("click", () => {{ stopPlay(); scrollToZone(segment.dataset.target); }});
-  playButton.addEventListener("click", () => {{ playTimer ? stopPlay() : startPlay(); }});
-  jumpFirstButton.addEventListener("click", () => {{ stopPlay(); scrollToZone({json.dumps(first_zone["id"])}); }});
+  for (const node of nodes) node.addEventListener("click", () => scrollToZone(node.dataset.target));
+  for (const segment of segments) segment.addEventListener("click", () => scrollToZone(segment.dataset.target));
 
   const observer = new IntersectionObserver((entries) => {{
     const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
@@ -483,7 +602,9 @@ def build_html(spec: dict) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build a standalone HTML file architecture explainer.")
+    parser = argparse.ArgumentParser(
+        description="Build a standalone HTML file architecture explainer."
+    )
     parser.add_argument("--spec", required=True, help="Path to JSON spec.")
     parser.add_argument("--output", required=True, help="Path to output HTML file.")
     args = parser.parse_args()
