@@ -1,18 +1,39 @@
 ---
 name: upload-cline-tarball
-description: Build a fresh sdk-wip CLI tarball, validate clite/cline bin entries, upload it to uploading-sdk-wip S3 with a permanent public URL, and optionally update harbor-ara robinCliScripts defaults.
+description: Build a fresh sdk-wip CLI tarball, validate clite/cline bin entries, upload it to uploading-sdk-wip S3 with a permanent public URL, and optionally update harbor repo robinCliScripts defaults.
 ---
 
 # Upload Cline/Clite Tarball to S3 (Permanent URL)
 
 Use this skill when the user asks to upload a fresh CLI build to S3 using the permanent `uploading-sdk-wip` flow.
 
+## Preferred execution path (single script)
+
+Use the bundled script at [resources/upload-cline-tarball.sh](resources/upload-cline-tarball.sh).
+
+```bash
+bash <skill_dir>/resources/upload-cline-tarball.sh
+```
+
+Optional flags:
+
+- `--sdk-wip-dir <path>`
+- `--harbor-dir <path>`
+- `--run-bucket-setup`
+- `--update-robin-cli-scripts`
+- `--auto-fix-clite-cline`
+
+Equivalent env vars are also supported: `SDK_WIP_DIR`, `HARBOR_DIR`, `RUN_BUCKET_SETUP`, `UPDATE_ROBIN_CLI_SCRIPTS`, `AUTO_FIX_CLITE_CLINE`.
+
+The script enforces the same safety checks defined below (required preflight + 1-byte public `curl` verification).
+
 ## Inputs to collect
 
 - `sdk_wip_dir` (default: `/Users/robin/dev/sdk-wip`)
-- `harbor_ara_dir` (default: `/Users/robin/dev/harbor-ara`)
+- `harbor_dir` (default: `/Users/robin/dev/harbor-ara`)
 - `update_robin_cli_scripts` (`yes`/`no`, default `no`)
 - `run_bucket_setup` (`yes`/`no`, default `no`)
+- `auto_fix_clite_cline` (`yes`/`no`, default `no`)
 
 If inputs are missing, ask only for missing values.
 
@@ -49,6 +70,13 @@ NODE
 ```
 
 Stop if preflight fails.
+
+If `auto_fix_clite_cline=yes`, the bundled script will deterministically patch `apps/cli/package.json` to:
+- set `bin.clite` to `dist/index.js`
+- set `bin.cline` to `dist/index.js`
+- ensure `scripts.build:binary` includes `cp ./dist/cline ./dist/clite`
+
+It still fails if `scripts.build:binary` exists but is a non-string value.
 
 ## 2) One-time bucket setup (only when requested)
 
@@ -132,7 +160,7 @@ echo "$PUBLIC_URL"
 Only run if `update_robin_cli_scripts=yes`.
 
 ```bash
-cd "$harbor_ara_dir"
+cd "$harbor_dir"
 
 NEW_S3_URI="$S3_URI"
 NEW_PUBLIC_URL="$PUBLIC_URL"
