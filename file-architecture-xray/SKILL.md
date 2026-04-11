@@ -78,6 +78,12 @@ Weak zones:
 - repeated utility functions that only support another zone
 - every switch case as its own section
 
+### Caller context zones
+
+When the target file receives a pre-shaped input from an upstream call site, include the caller as a context zone. This shows the reader what contract the file actually receives and why certain assumptions are safe. For example, if a gateway resolves provider and model identity before calling the adapter, showing that resolution code explains why the adapter can branch on metadata without doing its own lookup.
+
+Place the caller zone first so the reader encounters the setup before the file's own logic. Source the zone from the adjacent file, not the target file.
+
 ## Writing Style
 
 Use the same tone as a strong architecture walkthrough:

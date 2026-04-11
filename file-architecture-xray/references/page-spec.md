@@ -145,7 +145,8 @@ Guidelines:
 ## Selection Rules
 
 - Use one primary file for most zones when possible.
-- Allow one or two context zones from adjacent files if they clarify the call path.
+- **Include a caller context zone** when the target file receives a pre-shaped input from an upstream call site. Show the caller's code so the reader understands what contract the file actually receives and why certain assumptions hold. Place this zone first.
+- Allow one or two context zones from adjacent files (caller, delegated module) if they clarify the call path or a separated concern.
 - Do not include more than seven zones unless the user explicitly asks for depth.
 - Keep each excerpt tight. Prefer 20-90 lines.
 
