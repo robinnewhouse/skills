@@ -1,91 +1,176 @@
 # Debug Client Snippets
 
-Copy-paste code to send logs to the debug server.
+Instrumentation snippets that match the Cursor debug-mode pattern. All
+instrumentation must live inside a `// #region agent log` … `// #endregion`
+block so cleanup is mechanical: delete the regions, done.
 
-## JavaScript (Browser/Node)
+Key conventions:
 
-```javascript
-// One-liner
-const dlog = (msg, data) => fetch('http://localhost:3333/log', {
-  method: 'POST',
-  headers: {'Content-Type': 'application/json'},
-  body: JSON.stringify({level: 'debug', message: msg, data, source: location?.pathname || 'node'})
-});
+- **`hypothesisId`** — short tag (`"A"`, `"B"`, `"sampler"`) tying an event to a specific hypothesis. Lets you test several hypotheses in one run.
+- **`location`** — `"file:function"` or `"subsystem:event"`. Keeps summaries useful.
+- **`message`** — one short human line.
+- **`data`** — structured details. Include IDs, counts, durations.
+- **Counter + sampler** for hot paths. Incrementing a counter every call and posting a 5 s rollup is far cheaper than logging every call, and it exposes rate-based bugs (runaway spawns, leaks) that per-event logs hide.
 
-// With levels
-const debugLog = {
-  debug: (msg, data) => dlog('debug', msg, data),
-  info: (msg, data) => dlog('info', msg, data),
-  warn: (msg, data) => dlog('warn', msg, data),
-  error: (msg, data) => dlog('error', msg, data)
-};
+Replace `DEBUG_SERVER` with the URL printed by `scripts/log-server.js` on
+startup (includes the session UUID).
 
-async function dlog(level, msg, data) {
-  try {
-    await fetch('http://localhost:3333/log', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({level, message: msg, data, source: 'app'})
-    });
-  } catch { console[level](msg, data); }
+## TypeScript / Node (recorder + sampler)
+
+```ts
+// #region agent log
+// Temporary instrumentation for <bug description>. Remove when fixed.
+
+const DEBUG_SERVER = "http://127.0.0.1:7695/ingest/<session-uuid>";
+const DEBUG_SESSION = "<short>";
+
+let samplerStarted = false;
+let lastCpu: NodeJS.CpuUsage | null = null;
+let lastSampleAt = 0;
+const counters = { ptySpawns: 0, ptyExits: 0, sdkEvents: 0 };
+
+function postLog(payload: Record<string, unknown>) {
+  void fetch(DEBUG_SERVER, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION },
+    body: JSON.stringify({ sessionId: DEBUG_SESSION, timestamp: Date.now(), ...payload }),
+  }).catch(() => {});
 }
+
+export function recordPtySpawn(taskId: string, pid: number): void {
+  counters.ptySpawns += 1;
+  postLog({
+    hypothesisId: "B",
+    location: "session-manager:spawn",
+    message: "pty spawn",
+    data: { taskId, pid, active: counters.ptySpawns - counters.ptyExits },
+  });
+}
+
+export function recordPtyExit(taskId: string, pid: number, exitCode: number): void {
+  counters.ptyExits += 1;
+  postLog({
+    hypothesisId: "B",
+    location: "session-manager:exit",
+    message: "pty exit",
+    data: { taskId, pid, exitCode },
+  });
+}
+
+export function recordSdkEvent(): void { counters.sdkEvents += 1; }
+
+export function startEnergyDebugSampler(): void {
+  if (samplerStarted) return;
+  samplerStarted = true;
+  lastCpu = process.cpuUsage();
+  lastSampleAt = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    const cpu = process.cpuUsage(lastCpu ?? undefined);
+    const elapsed = now - lastSampleAt;
+    lastCpu = process.cpuUsage();
+    lastSampleAt = now;
+    const totalMs = (cpu.user + cpu.system) / 1000;
+    const mem = process.memoryUsage();
+    postLog({
+      hypothesisId: "sampler",
+      location: "cli:sampler",
+      message: "5s sample",
+      data: {
+        elapsedMs: elapsed,
+        cpuPercent: Math.round((totalMs / elapsed) * 1000) / 10,
+        rssMb: Math.round(mem.rss / 1024 / 1024),
+        ...counters,
+      },
+    });
+    counters.sdkEvents = 0;
+  }, 5000);
+  timer.unref();
+}
+// #endregion
+```
+
+Call `startEnergyDebugSampler()` once at process start, and the recorder
+functions at each instrumentation point.
+
+## TypeScript / Browser
+
+```ts
+// #region agent log
+const DEBUG_SERVER = "http://127.0.0.1:7695/ingest/<session-uuid>";
+const DEBUG_SESSION = "<short>";
+
+export function dlog(hypothesisId: string, location: string, message: string, data?: unknown) {
+  void fetch(DEBUG_SERVER, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION },
+    body: JSON.stringify({ sessionId: DEBUG_SESSION, timestamp: Date.now(), hypothesisId, location, message, data }),
+    keepalive: true,
+  }).catch(() => {});
+}
+// #endregion
 ```
 
 ## Python
 
 ```python
-import requests
+# region agent log
+import time, requests
+DEBUG_SERVER = "http://127.0.0.1:7695/ingest/<session-uuid>"
+DEBUG_SESSION = "<short>"
 
-def dlog(msg, data=None, level='debug', source='python'):
+def dlog(hypothesis_id, location, message, data=None):
     try:
-        requests.post('http://localhost:3333/log', 
-            json={'level': level, 'message': msg, 'data': data, 'source': source}, 
-            timeout=1)
-    except:
-        print(f'[{level}] {msg}', data)
-
-# Usage
-dlog('Processing started', {'count': 100})
-dlog('Error occurred', {'error': str(e)}, level='error')
+        requests.post(
+            DEBUG_SERVER,
+            headers={"X-Debug-Session-Id": DEBUG_SESSION},
+            json={
+                "sessionId": DEBUG_SESSION,
+                "timestamp": int(time.time() * 1000),
+                "hypothesisId": hypothesis_id,
+                "location": location,
+                "message": message,
+                "data": data,
+            },
+            timeout=0.5,
+        )
+    except Exception:
+        pass
+# endregion
 ```
 
-## React Hook
+Python has no `#region` directive, but the `# region agent log` / `# endregion`
+comments still let grep-based cleanup work.
 
-```typescript
-import { useCallback } from 'react';
+## Go
 
-export function useDebugLog(source: string) {
-  const log = useCallback(async (level: string, message: string, data?: any) => {
-    try {
-      await fetch('http://localhost:3333/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, message, data, source })
-      });
-    } catch {
-      console[level as 'log'](message, data);
-    }
-  }, [source]);
+```go
+// #region agent log
+var debugServer = "http://127.0.0.1:7695/ingest/<session-uuid>"
+var debugSession = "<short>"
 
-  return {
-    debug: (msg: string, data?: any) => log('debug', msg, data),
-    info: (msg: string, data?: any) => log('info', msg, data),
-    error: (msg: string, data?: any) => log('error', msg, data),
-  };
+func dlog(hypID, location, message string, data any) {
+    body, _ := json.Marshal(map[string]any{
+        "sessionId": debugSession, "timestamp": time.Now().UnixMilli(),
+        "hypothesisId": hypID, "location": location, "message": message, "data": data,
+    })
+    req, _ := http.NewRequest("POST", debugServer, bytes.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("X-Debug-Session-Id", debugSession)
+    go func() { _, _ = http.DefaultClient.Do(req) }()
 }
-
-// Usage: const log = useDebugLog('MyComponent');
+// #endregion
 ```
 
-## Bash
+## Cleanup (works across languages)
 
 ```bash
-dlog() {
-  curl -s -X POST "http://localhost:3333/log" \
-    -H "Content-Type: application/json" \
-    -d "{\"level\": \"$1\", \"message\": \"$2\", \"source\": \"shell\"}" \
-    > /dev/null 2>&1
-}
+# Show every instrumentation region in the repo
+rg -n --multiline '#region agent log[\s\S]*?#endregion'
 
-# Usage: dlog "info" "Script started"
+# Find files that contain regions (for batched review)
+rg -l '#region agent log'
 ```
+
+Delete each region in its entirety, then run the full test suite and visually
+reproduce the original bug to confirm the fix holds without the instrumentation.
