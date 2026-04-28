@@ -7,7 +7,41 @@ description: Build a fresh sdk-wip CLI tarball, validate clite/cline bin entries
 
 Use this skill when the user asks to upload a fresh CLI build to S3 using the permanent `uploading-sdk-wip` flow.
 
-## Preferred execution path (single script)
+## Script routing
+
+First inspect `sdk_wip_dir/apps/cli/package.json` and choose the matching script.
+
+Use the temporary OpenTUI Linux x64 script when the CLI package has the platform-binary build system:
+
+- `dependencies["@opentui/core"]` exists
+- `scripts["build:platforms"]` is `bun script/build.ts`
+- `bin.clite` is `src/index.ts`
+
+```bash
+bash <skill_dir>/resources/upload-opentui-linux-x64-tarball.sh
+```
+
+This branch-specific script builds a `bun-linux-x64` compiled binary on the local machine, packs it as an npm-compatible tarball with both `clite` and `cline` bin entries, uploads it to `uploading-sdk-wip`, and verifies the permanent public URL with a 1-byte `curl` check. It is intended for Harbor runs that install with `npm install -g --ignore-scripts "$TARBALL_URL"` inside Linux x64 Docker/Modal containers.
+
+Optional flags:
+
+- `--sdk-wip-dir <path>`
+- `--harbor-dir <path>`
+- `--run-bucket-setup`
+- `--update-robin-cli-scripts`
+- `--skip-install`
+- `--skip-sdk-build`
+
+Equivalent env vars are also supported: `SDK_WIP_DIR`, `HARBOR_DIR`, `RUN_BUCKET_SETUP`, `UPDATE_ROBIN_CLI_SCRIPTS`, `SKIP_INSTALL`, `SKIP_SDK_BUILD`.
+
+Use the original script when the CLI package still has the old JS tarball build system:
+
+- `bin.clite` is `dist/index.js`
+- `bin.cline` is `dist/index.js`
+- `scripts["build:binary"]` copies `dist/cline` to `dist/clite`
+- `scripts["build:tgz"]` exists
+
+## Original execution path
 
 Use the bundled script at [resources/upload-cline-tarball.sh](resources/upload-cline-tarball.sh).
 

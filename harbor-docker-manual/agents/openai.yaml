@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor Docker Manual"
+  short_description: "Run Harbor task images manually in Docker."
+  default_prompt: "Help me trace a Harbor task image and run it manually in Docker with the same agent install steps."
