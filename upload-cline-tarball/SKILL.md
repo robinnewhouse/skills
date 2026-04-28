@@ -14,7 +14,7 @@ First inspect `sdk_wip_dir/apps/cli/package.json` and choose the matching script
 Use the temporary OpenTUI Linux x64 script when the CLI package has the platform-binary build system:
 
 - `dependencies["@opentui/core"]` exists
-- `scripts["build:platforms"]` is `bun script/build.ts`
+- `scripts["build:platforms"]` starts with `bun script/build.ts` (current main may include `--install-native-variants`)
 - `bin.clite` is `src/index.ts`
 
 ```bash

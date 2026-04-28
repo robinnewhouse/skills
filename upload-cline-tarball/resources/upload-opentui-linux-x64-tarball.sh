@@ -118,8 +118,8 @@ const errors = []
 if (!p.dependencies?.["@opentui/core"]) {
   errors.push("apps/cli/package.json must depend on @opentui/core")
 }
-if (p.scripts?.["build:platforms"] !== "bun script/build.ts") {
-  errors.push("apps/cli package should expose scripts.build:platforms = bun script/build.ts")
+if (typeof p.scripts?.["build:platforms"] !== "string" || !p.scripts["build:platforms"].startsWith("bun script/build.ts")) {
+  errors.push("apps/cli package should expose scripts.build:platforms starting with bun script/build.ts")
 }
 if (p.bin?.clite !== "src/index.ts") {
   errors.push("OpenTUI development package is expected to keep bin.clite = src/index.ts")
