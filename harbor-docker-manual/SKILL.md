@@ -1,6 +1,10 @@
 ---
 name: harbor-docker-manual
-description: Manually reproduce Harbor task containers in local Docker. Use when the user wants to inspect or run a Harbor benchmark image by hand, trace a Harbor job or script such as instance/robinCliScripts/v2.sh to find the task Docker image, install a Cline/clite tarball inside the container, debug Harbor agent setup commands, or run Cline manually from inside a Docker shell.
+description: Manually reproduce Harbor task containers in local Docker. Use when
+  the user wants to inspect or run a Harbor benchmark image by hand, trace a
+  Harbor job or script such as instance/robinCliScripts/v2.sh to find the task
+  Docker image, install a Cline/clite tarball inside the container, debug Harbor
+  agent setup commands, or run Cline manually from inside a Docker shell.
 ---
 
 # Harbor Docker Manual

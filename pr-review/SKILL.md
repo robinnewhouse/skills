@@ -1,6 +1,8 @@
 ---
 name: pr-review
-description: Review GitHub pull requests using the gh CLI. Use when asked to review a PR, check a pull request, or give feedback on a GitHub PR. Gathers PR info, analyzes changes, and helps approve or request changes.
+description: Review GitHub pull requests using the gh CLI. Use when asked to
+  review a PR, check a pull request, or give feedback on a GitHub PR. Gathers PR
+  info, analyzes changes, and helps approve or request changes.
 ---
 
 # PR Review

@@ -1,6 +1,8 @@
 ---
 name: git-worktrees
-description: Manage Git worktrees to work on multiple branches simultaneously. Use when the user wants to start a new feature, work on something in parallel, switch context without stashing, or mentions worktrees.
+description: Manage Git worktrees to work on multiple branches simultaneously.
+  Use when the user wants to start a new feature, work on something in parallel,
+  switch context without stashing, or mentions worktrees.
 ---
 
 # Git Worktrees

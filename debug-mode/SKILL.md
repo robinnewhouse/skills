@@ -89,6 +89,22 @@ Watch events stream in:
 node ~/.claude/plugins/debug-mode/skills/debug-mode/scripts/read-logs.js --watch
 ```
 
+#### Manual repro handoff checkpoint
+
+If you cannot personally reproduce the bug after instrumentation, ask the
+user to reproduce it and then stop. Include:
+
+- The exact command to run the instrumented build
+- The exact UI path or actions to take
+- The log file path being watched
+- The signal you need from the user, such as "tell me when it crashed" or
+  "send the last visible error"
+
+Do not proceed to analysis, fix, or cleanup until either:
+
+- Log events arrive and you analyze them, or
+- The user explicitly tells you to stop waiting and make a speculative fix
+
 If nothing arrives, the instrumented path isn't executing — check HMR
 issues (Node/TS dev servers often need a full restart, not just a reload),
 verify the `DEBUG_SERVER` URL matches the server's startup output, and
@@ -127,14 +143,17 @@ are ambiguous, add more targeted logs rather than guessing.
 
 1. Implement the fix with instrumentation **still in place**
 2. Reproduce again — the sampler should show the metric returning to baseline
-3. Find every region:
+3. Before deleting instrumentation, confirm reproduction is complete. If the
+   user was asked to reproduce manually, ask for their confirmation before
+   cleanup, even if you found a likely static fix.
+4. Find every region:
 
    ```bash
    rg -l '#region agent log'
    ```
 
-4. Delete each region in full (don't leave stubs behind)
-5. Run the test suite and do one final manual reproduction without instrumentation
+5. Delete each region in full (don't leave stubs behind)
+6. Run the test suite and do one final manual reproduction without instrumentation
 
 ## Server and file layout
 
@@ -154,6 +173,9 @@ environment works in the other.
 - Posting inside a hot loop without a counter — floods the server and hides the signal
 - Cleaning up by deleting specific lines — you'll miss some. Delete regions.
 - Declaring the bug fixed because the error is gone. Confirm via the sampler that the underlying metric (CPU, handle count, memory) returned to baseline.
+- Asking the user to reproduce and then immediately removing instrumentation before they have a chance to do it.
+- Treating a plausible code inspection finding as a debug-mode conclusion without runtime evidence.
+- Cleaning up instrumentation after a failed or incomplete self-repro unless the user explicitly confirms they are done reproducing or approves abandoning runtime debugging.
 
 ## Scripts
 

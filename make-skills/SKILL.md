@@ -1,6 +1,7 @@
 ---
 name: make-skills
-description: Create or update Cline skills. Use when asked to write a new skill, edit an existing skill, or set up skill resources.
+description: Create or update Cline skills. Use when asked to write a new skill,
+  edit an existing skill, or set up skill resources.
 ---
 
 # Make Skills

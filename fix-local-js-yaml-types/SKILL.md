@@ -1,6 +1,8 @@
 ---
 name: fix-local-js-yaml-types
-description: Fix local TypeScript compile errors about missing js-yaml types without modifying package.json by performing a clean reinstall of dependencies.
+description: Fix local TypeScript compile errors about missing js-yaml types
+  without modifying package.json by performing a clean reinstall of
+  dependencies.
 ---
 
 # Fix local js-yaml types error (no package.json changes)

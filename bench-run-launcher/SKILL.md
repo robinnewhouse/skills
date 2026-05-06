@@ -1,6 +1,10 @@
 ---
 name: bench-run-launcher
-description: Launch full SWE-bench or Terminal-Bench Harbor runs end-to-end with optional tarball build, S3 upload/presign for Modal, Docker or Modal execution, persisted run manifests, and watcher handoff. Use when a user asks to kick off benchmark runs quickly and reproducibly.
+description: Launch full SWE-bench or Terminal-Bench Harbor runs end-to-end with
+  optional tarball build, S3 upload/presign for Modal, Docker or Modal
+  execution, persisted run manifests, and watcher handoff. Use when a user asks
+  to kick off benchmark runs quickly and reproducibly.
+disabled: true
 ---
 
 # Bench Run Launcher
