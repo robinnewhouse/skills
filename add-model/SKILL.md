@@ -3,6 +3,7 @@ name: add-model
 description: Add a new AI model to the Cline codebase. Use when adding new model
   definitions, updating model configurations, or adding support for new AI
   models to existing providers.
+disabled: true
 ---
 
 # Add Model to Cline
