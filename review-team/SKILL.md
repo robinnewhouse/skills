@@ -1,6 +1,6 @@
 ---
 name: review-team
-description: Use when the user asks for a code review by a fleet of specialized reviewer agents, wants multiple independent reviewer perspectives, or asks to run reviewers in single-pass or iterative fix-until-clean mode. Launches focused subagents for correctness, security, architecture, conventions, simplicity, UX, reliability, testing, compatibility, and documentation review.
+description: Use when the user asks for a code review by a fleet of specialized reviewer agents, wants multiple independent reviewer perspectives, or asks to run reviewers in single-pass or iterative fix-until-clean mode. Launches focused subagents for correctness, security, architecture, conventions, simplicity, UX, reliability, telemetry, testing, compatibility, and documentation review.
 ---
 
 # Review Team
@@ -30,6 +30,7 @@ Specialist reviewers:
 
 - `reviewers/product-ux-accessibility-reviewer.md`
 - `reviewers/performance-reliability-reviewer.md`
+- `reviewers/telemetry-observability-reviewer.md`
 - `reviewers/testing-strategy-reviewer.md`
 - `reviewers/api-compatibility-reviewer.md`
 - `reviewers/documentation-dx-reviewer.md`
@@ -88,4 +89,3 @@ For **iterate** mode, return:
 - What verification ran.
 - Which reviewers were rerun.
 - Any remaining findings or accepted tradeoffs.
-
