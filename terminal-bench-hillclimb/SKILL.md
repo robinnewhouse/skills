@@ -190,7 +190,7 @@ export API_KEY=$OPENROUTER_API_KEY  # or $CLINE_API_KEY
 # Run the specific failing task
 harbor run \
   -d terminal-bench@2.0 \
-  -t "<task-name>" \
+  --include-task-name "<task-name>" \
   -a cline-cli \
   -m openrouter:anthropic/claude-opus-4.6 \
   --ak tarball_url=$TARBALL_URL \
@@ -203,13 +203,123 @@ For Modal (parallel/full runs):
 ```bash
 harbor run \
   -d terminal-bench@2.0 \
-  -t "<task-name>" \
+  --include-task-name "<task-name>" \
   -a cline-cli \
   -m openrouter:anthropic/claude-opus-4.6 \
   --ak tarball_url=$TARBALL_URL \
   --env modal \
   -n 1
 ```
+
+### One-task Weave/provider-request smoke
+
+Use this path when the goal is to verify Cline SDK CLI provider-request capture
+and Weave traces, not to hillclimb a prompt. Run one stable task such as
+`regex-log`.
+
+Important setup details:
+
+- Use Cline AWS account `robin@cline.bot`, bucket `cline-test-builds`, region
+  `us-west-2`. Do not use `uploading-sdk-wip`.
+- Local Docker on Robin's Apple Silicon machine needs a Linux `arm64` CLI
+  tarball. Linux `x64` is for x64 Docker/Modal.
+- Harbor installs the CLI tarball with `npm install -g --ignore-scripts`.
+- Private GitHub plugin clones fail inside the task container. Package/upload
+  the plugin source tarball to `cline-test-builds` and pass it as
+  `plugin_tarball_url`.
+- Plugin-enabled CLI tarballs must include plugin sandbox host runtime deps. If
+  `cline.log` says the plugin sandbox cannot find `@cline/shared`, the tarball
+  is missing the host `@cline/*` packages that
+  `extensions/plugin-sandbox-bootstrap.js` resolves.
+
+Command shape:
+
+```bash
+cd ~/dev/harbor
+source ~/.env
+export API_KEY="$OPENROUTER_API_KEY"
+
+TARBALL_URL="$(aws s3 presign s3://cline-test-builds/<cli-tarball-key> --region us-west-2 --expires-in 604800)"
+PLUGIN_URL="$(aws s3 presign s3://cline-test-builds/<plugin-tarball-key> --region us-west-2 --expires-in 604800)"
+JOB_NAME="weave-trace-smoke-$(date -u +%Y%m%dT%H%M%SZ)"
+
+uv run --no-sync harbor run \
+  -d terminal-bench@2.0 \
+  --include-task-name regex-log \
+  -a cline-cli \
+  -m openrouter:anthropic/claude-opus-4.6 \
+  --ak "tarball_url=${TARBALL_URL}" \
+  --ak "plugin_tarball_url=${PLUGIN_URL}" \
+  --ak setup-command-timeout-sec=600 \
+  --ak timeout=600 \
+  --ae "WANDB_API_KEY=${WANDB_API_KEY}" \
+  --ae WEAVE_PROJECT=cline-testing/terminal-bench-smoke \
+  --ae WEAVE_CAPTURE_CONTENT=true \
+  --ae WEAVE_MAX_PAYLOAD_CHARS=1000000 \
+  --ae CLINE_DATA_DIR=/logs/agent/cline-data \
+  --ae CLINE_CAPTURE_PROVIDER_REQUEST=full \
+  --ae CLINE_CAPTURE_WIRE=true \
+  --ae CLINE_CAPTURE_MAX_PREVIEW_BYTES=1000000 \
+  --ae WEAVE_DEBUG=true \
+  --ae WEAVE_DEBUG_FILE=true \
+  --ae WEAVE_DEBUG_FILE_PATH=/logs/agent/weave-tracing.log \
+  --env docker \
+  -n 1 \
+  --force-build \
+  --job-name "$JOB_NAME"
+```
+
+Local artifact checks:
+
+```bash
+JOB=~/dev/harbor/jobs/<job-name>
+TRIAL="$(find "$JOB" -maxdepth 1 -type d -name 'regex-log__*' | head -n 1)"
+test -n "$TRIAL"
+
+cat "$JOB/result.json" | jq '.stats'
+cat "$TRIAL/result.json" | jq '.verifier_result'
+cat "$TRIAL/verifier/reward.txt"
+cat "$TRIAL/verifier/test-stdout.txt"
+
+rg -n "W&B Weave tracing plugin initialized|run-started|run-finished|plugin loading failed|ERR_MODULE_NOT_FOUND" \
+  "$TRIAL/agent/weave-tracing.log" \
+  "$TRIAL/agent/cline-data/logs/cline.log"
+
+node - "$TRIAL"/agent/cline-data/provider-request-captures/*.ndjson <<'NODE'
+const fs = require("fs");
+const file = process.argv[2];
+const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+const counts = {};
+let full = 0;
+let payload = 0;
+for (const line of lines) {
+  const row = JSON.parse(line);
+  counts[row.captureStage] = (counts[row.captureStage] || 0) + 1;
+  if (row.mode === "full") full++;
+  if (row.payload) payload++;
+}
+console.log(JSON.stringify({ lines: lines.length, counts, full, payload }, null, 2));
+NODE
+```
+
+Remote Weave verification:
+
+1. Extract `runId` from `agent/weave-tracing.log`.
+2. Query `https://trace.wandb.ai/calls/stream_query` with Basic auth
+   `api:$WANDB_API_KEY` and `project_id: cline-testing/terminal-bench-smoke`.
+3. Confirm all returned calls for that run share the same `cline_run_id`.
+4. Expected good signal: one `cline.run`, many `cline.model`, and tool spans.
+5. Every `cline.model` span should have:
+   - `provider_request.pre_build_for_api.payload`
+   - `provider_request.ai_sdk_prompt.payload`
+   - `provider_request.wire_request.payload`
+
+Provider-request stage meanings:
+
+- `pre_build_for_api`: Cline runtime intent before final provider conversion.
+- `ai_sdk_prompt`: AI SDK/provider-adapter request shape.
+- `wire_request`: literal provider HTTP body captured when
+  `CLINE_CAPTURE_WIRE=true`.
 
 ## Step 7: Check Results
 
@@ -224,12 +334,11 @@ jobs/<job-id>/<task-name>__<random-id>/
 ├── exception.txt        ← If infrastructure crashed (Modal timeout, sandbox died, etc.)
 ├── trial.log            ← Harbor orchestration log
 ├── agent/
-│   ├── cline.txt        ← Full agent conversation log (THE key file for debugging)
+│   ├── cline.txt        ← Full agent conversation log (THE key file for debugging); ends with __CLINE_EXIT=<status>
 │   ├── install.sh       ← Generated install script (verify tarball URL was templated correctly)
-│   ├── setup/           ← Install output (check if cline installed successfully)
-│   ├── command-0/       ← Setup config command output
-│   ├── command-1/       ← Auth command output
-│   └── command-2/       ← Cline run command output
+│   ├── setup/           ← One <label>.log per install/setup command (e.g. setup/install.log); check if cline installed successfully
+│   ├── sessions/        ← Raw Cline session copied from the container (~/.cline/data/sessions/<id>/<id>.messages.json)
+│   └── trajectory.json  ← ATIF trajectory (converted from the session)
 └── verifier/
     ├── test-stdout.txt  ← Pytest output (GROUND TRUTH — did tests pass?)
     ├── reward.txt       ← Numeric reward value
@@ -259,8 +368,8 @@ cat ~/dev/harbor/jobs/$JOB/<task-name>__*/exception.txt 2>/dev/null
 # Verify which tarball was used
 cat ~/dev/harbor/jobs/$JOB/<task-name>__*/result.json | jq '.config.agent.kwargs'
 
-# Check install succeeded
-cat ~/dev/harbor/jobs/$JOB/<task-name>__*/agent/setup/stdout.txt | tail -10
+# Check install succeeded (one log per setup/install command; each has a header + STDOUT/STDERR)
+cat ~/dev/harbor/jobs/$JOB/<task-name>__*/agent/setup/*.log | tail -20
 ```
 
 ### Common result patterns
@@ -268,7 +377,7 @@ cat ~/dev/harbor/jobs/$JOB/<task-name>__*/agent/setup/stdout.txt | tail -10
 - `verifier_result.rewards = {"0.0": [...]}` → FAILED (read test-stdout.txt)
 - `verifier_result = null` + `exception_info.exception_type = "NotFoundError"` → Modal sandbox died before verifier ran (inconclusive, retry needed)
 - `exception_info.exception_type = "AgentTimeoutError"` → Agent ran out of time
-- No `cline.txt` file → Agent install or auth failed (check setup/stdout.txt)
+- No `cline.txt` file → Agent install or auth failed (check `agent/setup/*.log`)
 
 ## Step 8: Report to User
 
