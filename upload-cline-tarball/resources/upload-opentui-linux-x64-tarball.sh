@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SDK_WIP_DIR="${SDK_WIP_DIR:-/Users/robin/dev/sdk-wip}"
+SDK_DIR="${SDK_DIR:-${SDK_WIP_DIR:-/Users/robin/dev/cline/sdk}}"
 HARBOR_DIR="${HARBOR_DIR:-/Users/robin/dev/harbor-ara}"
 UPDATE_ROBIN_CLI_SCRIPTS="${UPDATE_ROBIN_CLI_SCRIPTS:-no}"
 RUN_BUCKET_SETUP="${RUN_BUCKET_SETUP:-no}"
@@ -20,11 +20,11 @@ usage() {
 Usage: bash upload-opentui-linux-x64-tarball.sh [options]
 
 Builds the OpenTUI CLI as a Linux x64 compiled Bun binary, wraps it in a
-minimal npm-compatible tarball with both clite and cline bin entries, uploads
-it to S3, and verifies public byte-range readability.
+minimal npm-compatible tarball with a cline bin entry, uploads it to S3, and
+verifies public byte-range readability.
 
 Options:
-  --sdk-wip-dir <path>            Path to sdk-wip repo (default: /Users/robin/dev/sdk-wip)
+  --sdk-dir <path>                Path to Cline SDK repo (default: /Users/robin/dev/cline/sdk)
   --harbor-dir <path>             Path to harbor repo (default: /Users/robin/dev/harbor-ara)
   --update-robin-cli-scripts      Update harbor-ara script defaults after upload (default: off)
   --run-bucket-setup              Run one-time S3 bucket public policy setup (default: off)
@@ -33,15 +33,15 @@ Options:
   -h, --help                      Show this help
 
 Environment variable equivalents:
-  SDK_WIP_DIR, HARBOR_DIR, UPDATE_ROBIN_CLI_SCRIPTS, RUN_BUCKET_SETUP,
+  SDK_DIR, SDK_WIP_DIR, HARBOR_DIR, UPDATE_ROBIN_CLI_SCRIPTS, RUN_BUCKET_SETUP,
   SKIP_INSTALL, SKIP_SDK_BUILD
 USAGE
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --sdk-wip-dir)
-      SDK_WIP_DIR="$2"
+    --sdk-dir|--sdk-wip-dir)
+      SDK_DIR="$2"
       shift 2
       ;;
     --harbor-dir)
@@ -107,8 +107,8 @@ validate_yes_no "RUN_BUCKET_SETUP" "$RUN_BUCKET_SETUP"
 validate_yes_no "SKIP_INSTALL" "$SKIP_INSTALL"
 validate_yes_no "SKIP_SDK_BUILD" "$SKIP_SDK_BUILD"
 
-echo "==> OpenTUI Linux x64 tarball preflight (${SDK_WIP_DIR})"
-cd "$SDK_WIP_DIR"
+echo "==> OpenTUI Linux x64 tarball preflight (${SDK_DIR})"
+cd "$SDK_DIR"
 
 node <<'NODE'
 const fs = require("fs")
@@ -118,11 +118,14 @@ const errors = []
 if (!p.dependencies?.["@opentui/core"]) {
   errors.push("apps/cli/package.json must depend on @opentui/core")
 }
+if (p.name !== "@cline/cli") {
+  errors.push("apps/cli/package.json name must be @cline/cli")
+}
 if (typeof p.scripts?.["build:platforms"] !== "string" || !p.scripts["build:platforms"].startsWith("bun script/build.ts")) {
   errors.push("apps/cli package should expose scripts.build:platforms starting with bun script/build.ts")
 }
-if (p.bin?.clite !== "src/index.ts") {
-  errors.push("OpenTUI development package is expected to keep bin.clite = src/index.ts")
+if (p.bin?.cline !== "src/index.ts") {
+  errors.push("OpenTUI development package is expected to keep bin.cline = src/index.ts")
 }
 
 if (errors.length) {
@@ -163,7 +166,7 @@ JSON
     --policy "file://${POLICY_FILE}"
 fi
 
-CLI_DIR="${SDK_WIP_DIR}/apps/cli"
+CLI_DIR="${SDK_DIR}/apps/cli"
 DIST_DIR="${CLI_DIR}/dist"
 TARGET_DIST_DIR="${DIST_DIR}/cli-${TARGET_NAME}"
 PACKAGE_DIR="$(mktemp -d /tmp/cline-opentui-linux-x64-package.XXXXXX)"
@@ -191,15 +194,15 @@ if [ "$SKIP_SDK_BUILD" != "yes" ]; then
   bun run build:sdk
 
   echo "==> Building CLI JS bundle"
-  bun -F @clinebot/cli build
+  bun -F @cline/cli build
 fi
 
 echo "==> Compiling OpenTUI CLI for ${TARGET_NAME}"
 rm -rf "$TARGET_DIST_DIR"
 mkdir -p "${TARGET_DIST_DIR}/bin"
 
-BINARY_OUT="${TARGET_DIST_DIR}/bin/clite"
-TMP_BINARY="${TMP_BUILD_DIR}/clite"
+BINARY_OUT="${TARGET_DIST_DIR}/bin/cline"
+TMP_BINARY="${TMP_BUILD_DIR}/cline"
 bun build "${CLI_DIR}/src/index.ts" \
   --compile \
   --target "bun-${TARGET_OS}-${TARGET_ARCH}" \
@@ -210,7 +213,7 @@ bun build "${CLI_DIR}/src/index.ts" \
 cp "$TMP_BINARY" "$BINARY_OUT"
 chmod 755 "$BINARY_OUT"
 
-BOOTSTRAP_SRC="${SDK_WIP_DIR}/packages/core/dist/extensions/plugin-sandbox-bootstrap.js"
+BOOTSTRAP_SRC="${SDK_DIR}/packages/core/dist/extensions/plugin-sandbox-bootstrap.js"
 if [ -f "$BOOTSTRAP_SRC" ]; then
   mkdir -p "${TARGET_DIST_DIR}/extensions"
   cp "$BOOTSTRAP_SRC" "${TARGET_DIST_DIR}/extensions/plugin-sandbox-bootstrap.js"
@@ -227,15 +230,14 @@ NODE
 
 cat > "${TARGET_DIST_DIR}/package.json" <<JSON
 {
-  "name": "@clinebot/cli-opentui-linux-x64",
+  "name": "@cline/cli-opentui-linux-x64",
   "version": "${VERSION}",
   "description": "Temporary OpenTUI Cline CLI Linux x64 tarball for Harbor",
   "license": "Apache-2.0",
   "os": ["linux"],
   "cpu": ["x64"],
   "bin": {
-    "clite": "bin/clite",
-    "cline": "bin/clite"
+    "cline": "bin/cline"
   }
 }
 JSON
@@ -252,24 +254,18 @@ tar -czf "$TARBALL_PATH" -C "$PACKAGE_DIR" package
 echo "==> Validating tarball shape"
 PKG_NAME="$(tar -xOf "$TARBALL_PATH" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).name))')"
 PKG_VERSION="$(tar -xOf "$TARBALL_PATH" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).version))')"
-BIN_CLITE="$(tar -xOf "$TARBALL_PATH" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).bin?.clite || ""))')"
 BIN_CLINE="$(tar -xOf "$TARBALL_PATH" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).bin?.cline || ""))')"
 
-if [ "$BIN_CLITE" != "bin/clite" ]; then
-  echo "Tarball validation failed: .bin.clite must be bin/clite" >&2
+if [ "$BIN_CLINE" != "bin/cline" ]; then
+  echo "Tarball validation failed: .bin.cline must be bin/cline" >&2
   exit 1
 fi
-if [ "$BIN_CLINE" != "bin/clite" ]; then
-  echo "Tarball validation failed: .bin.cline must be bin/clite" >&2
-  exit 1
-fi
-if ! tar -tzf "$TARBALL_PATH" | grep -q '^package/bin/clite$'; then
-  echo "Tarball validation failed: package/bin/clite missing" >&2
+if ! tar -tzf "$TARBALL_PATH" | grep -q '^package/bin/cline$'; then
+  echo "Tarball validation failed: package/bin/cline missing" >&2
   exit 1
 fi
 
 echo "Package: ${PKG_NAME}@${PKG_VERSION}"
-echo "bin.clite: ${BIN_CLITE}"
 echo "bin.cline: ${BIN_CLINE}"
 echo "Tarball: ${TARBALL_PATH}"
 
