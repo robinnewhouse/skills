@@ -1,6 +1,8 @@
 ---
 name: get-last-week-prs
-description: Summarize GitHub pull request activity. Use when asked about recent PRs, work summary, what was accomplished, or weekly updates. Supports custom time ranges, repos, and authors.
+description: Summarize GitHub pull request activity. Use when asked about recent
+  PRs, work summary, what was accomplished, or weekly updates. Supports custom
+  time ranges, repos, and authors.
 ---
 
 # Get PR Activity Summary
