@@ -1,7 +1,7 @@
 {
     "run_name": "<benchmark>-<model_short>-<env>-<YYYYMMDD-HHMMSS>",
     "requested_at": "<ISO8601 when user asked for the run>",
-    "launched_at": "<ISO8601 when harbor run command was executed>",
+    "launched_at": "<ISO8601 when source-bound Harbor run command was executed>",
     "cwd": "<harbor working directory>",
     "git_branch": "<harbor repo branch>",
     "git_commit": "<harbor repo HEAD commit hash>",
@@ -32,7 +32,7 @@
             "<list of PR descriptions included in this build, or omit if none>"
         ]
     },
-    "launch_command": "<full nohup harbor run ... command>",
+    "launch_command": "<full nohup env PYTHONPATH=$HARBOR_DIR/src $HARBOR_PY -m harbor.cli.main run ... command>",
     "pid": "<process ID from echo $!>",
     "log_file": "<absolute path to .log file>",
     "watcher": {

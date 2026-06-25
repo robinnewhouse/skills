@@ -22,9 +22,7 @@ resolve_job_dir() {
   # Try common Harbor job locations
   for candidate in \
     "${HARBOR_DIR:-$PWD}/jobs/$input" \
-    "${HARBOR_DIR:-$PWD}/jobs_sdk/$input" \
-    "$PWD/jobs/$input" \
-    "$PWD/jobs_sdk/$input"; do
+    "$PWD/jobs/$input"; do
     if [[ -d "$candidate" ]]; then
       printf '%s\n' "$candidate"
       return
@@ -59,7 +57,7 @@ show_runners() {
     cmd="$(cut -d' ' -f3- <<< "$line")"
     echo "  PID $pid (${elapsed}): $cmd"
   done < <(ps -Ao pid=,etime=,command= 2>/dev/null \
-    | grep -E "harbor run.*(swebench-verified|terminal-bench)" \
+    | grep -E "(harbor run|harbor\\.cli\\.main run).*(swebench-verified|terminal-bench)" \
     | grep -v grep || true)
   [[ $found -eq 0 ]] && echo "  none"
   echo

@@ -1,330 +1,372 @@
 ---
 name: bench-run-launcher
-description: Launch full SWE-bench or Terminal-Bench Harbor runs end-to-end with
-  optional tarball build, S3 upload/presign for Modal, Docker or Modal
-  execution, persisted run manifests, and watcher handoff. Use when a user asks
-  to kick off benchmark runs quickly and reproducibly.
-disabled: true
+description: Launch reproducible Harbor benchmark runs, especially Cline CLI Terminal-Bench Modal runs, with baseline config checks, local tarball upload, manifests, and watcher handoff.
 ---
 
 # Bench Run Launcher
 
-Use this skill when the user wants to start a benchmark run (SWE-bench or Terminal-Bench) and wants a reproducible launch record.
+Use this skill when launching or checking Harbor benchmark runs. For Robin's
+Cline Terminal-Bench work, optimize for reproducibility over convenience:
+inspect the baseline run, copy invariants, smoke first, then launch.
 
-## Core Behavior
+Cline is the default path below. For less common agents, read
+[resources/opencode.md](resources/opencode.md) or [resources/pi.md](resources/pi.md)
+after the baseline invariant gate.
 
-- Support **guided mode** (ask for missing required inputs) and **non-interactive mode** (all inputs provided up front).
-- Always persist a **run manifest** after launch.
-- Hand off monitoring using the bundled watch script at [resources/watch-job.sh](resources/watch-job.sh).
+## Default Context
 
-## Important Conventions
-
-> **`tarball_url` uses an UNDERSCORE, not a hyphen.** The correct `--ak` key is `tarball_url`. Do NOT use `tarball-url`. This applies to both the `harbor run` command and the manifest.
-
-> **All paths in this skill are placeholders.** Replace `$HARBOR_DIR`, `$SDK_CLI_DIR`, `$TARBALL_DIR` etc. with the user's actual paths. Never hardcode any user's home directory.
-
-> **SDK CLI tarballs must be packed from `apps/cli`, not the repo root.** The canonical command is:
-> ```bash
-> cd "$SDK_CLI_DIR/apps/cli" && npm pack --pack-destination "$TARBALL_DIR"
-> ```
-> Do NOT run `npm pack` from `$SDK_CLI_DIR` root — that produces a broken tarball.
-
-## 1) Collect Inputs
-
-Required inputs:
-
-1. `benchmark`: `swebench` or `terminalbench`
-2. `environment`: `modal` or `docker`
-3. `model`: model string (e.g., `openrouter:google/gemini-3-flash-preview`)
-   - **Exacto variants:** Append `:exacto` to any OpenRouter model ID for quality-first provider routing (e.g., `openrouter:moonshotai/kimi-k2.5:exacto`). See [OpenRouter Exacto docs](https://openrouter.ai/docs/guides/routing/model-variants/exacto). When using `:exacto`, also pass `--ak refresh-models=true` so the CLI doesn't reject the model ID against its local catalog.
-4. `tarball_source`: one of:
-   - `existing_url` — user provides a URL directly
-   - `build_and_upload` — build from source, optionally upload to S3, (suggest to user that they can provide the repository from which to build the tarball)
-   - `local_tarball` — user points to an existing `.tgz` file on disk
-
-Optional inputs (with defaults):
-
-- `agent` (default `cline-cli`)
-- `run_name` (default: `<benchmark>-<model_short>-<env>-$(date +%Y%m%d-%H%M%S)`)
-- `task_limit` (`-l`; full defaults: SWE=500, TB=89)
-- `concurrency` (`-n`; default 100 for Modal, 5 for Docker)
-- `timeout` (default 1000)
-- `reasoning_effort` (default `none`)
-- `max_consecutive_mistakes` (default 15)
-- `double_check_completion` (default `false`)
-- `canary_first` (default false — if true, run 4 tasks first as a smoke test)
-
-If required inputs are missing, ask concise questions only for the missing fields.
-
-## 2) Resolve Dataset + Defaults
-
-Map benchmark to dataset flag:
-
-- `swebench` → `-d swebench-verified@1.0`
-- `terminalbench` → `-d terminal-bench@2.0`
-
-Default panel sizes:
-
-- SWE-bench full: `-l 500`
-- Terminal-Bench full: `-l 89`
-
-Concurrency guardrails:
-
-- Docker local: keep `-n` ≤ 9 unless user explicitly overrides.
-- Modal: use the requested concurrency (typical: 30–100).
-
-## 3) Build / Locate Tarball
-
-### If `tarball_source=build_and_upload`
-
-1. Ask for the SDK CLI source directory (`$SDK_CLI_DIR`).
-2. Build the tarball — **from `apps/cli`, not the repo root**:
-   ```bash
-   TARBALL_FILE=$(cd "$SDK_CLI_DIR/apps/cli" && npm pack --pack-destination "$TARBALL_DIR" | tail -n 1)
-   ```
-3. Compute checksum + size:
-   ```bash
-   shasum "$TARBALL_DIR/$TARBALL_FILE"
-   wc -c < "$TARBALL_DIR/$TARBALL_FILE"
-   ```
-
-### If `tarball_source=local_tarball`
-
-1. Verify the tarball path exists.
-2. Compute checksum + size.
-3. For Docker: serve the tarball directory over HTTP if not already running:
-   ```bash
-   # Start once; skip if port 8199 is already in use
-   lsof -i :8199 >/dev/null 2>&1 || \
-     nohup python3 -m http.server 8199 --directory "$TARBALL_DIR" >/tmp/tarball-server.log 2>&1 &
-   ```
-   Then the tarball URL for Docker containers is:
-   ```
-   http://host.docker.internal:8199/<tarball_filename>
-   ```
-
-### If `tarball_source=existing_url`
-
-- Use the URL as-is. Validate it is reachable if practical.
-
-## 4) Upload + Presign (Modal path)
-
-When environment is Modal and the tarball is local (not already a URL):
-
-1. Upload to S3:
-   ```bash
-   aws s3 cp "$TARBALL_DIR/$TARBALL_FILE" \
-     "s3://cline-test-builds/cline-builds/$TARBALL_FILE" \
-     --profile cline-builds --region us-west-2
-   ```
-2. Generate a presigned URL (24h expiry):
-   ```bash
-   aws s3 presign "s3://cline-test-builds/cline-builds/$TARBALL_FILE" \
-     --expires-in 86400 --profile cline-builds --region us-west-2
-   ```
-3. Use the presigned URL as the `tarball_url` value.
-
-## 5) Launch Harbor Run
-
-Build the launch command. Always use `nohup` and background with `&`.
-
-Template:
+For Robin's Harbor ATIF Cline-provider runs:
 
 ```bash
-nohup harbor run \
+HARBOR_DIR=/home/robin_cline_bot/harbor
+LOCAL_CLINE_DIR=/Users/robin/dev/cline
+HARBOR_PY="$HARBOR_DIR/.venv/bin/python"
+HARBOR_RUN=(env PYTHONPATH="$HARBOR_DIR/src" "$HARBOR_PY" -m harbor.cli.main run)
+```
+
+`HARBOR_DIR` is the Harbor repo on the Harbor VM. It is not the Cline checkout.
+Build Cline tarballs locally from `LOCAL_CLINE_DIR`, then copy the packed Linux
+x64 tarball to the Harbor VM under `$HARBOR_DIR/local-tarballs/`.
+
+Never use bare `harbor`, `/usr/local/bin/harbor`, or another user's Harbor
+checkout for Robin benchmark launches or adapter inspection. On the Harbor VM,
+`/usr/local/bin/harbor` has resolved to `/home/ara_cline_bot/harbor`; that is
+the wrong source for Robin's runs. Always launch and inspect with
+`PYTHONPATH="$HARBOR_DIR/src" "$HARBOR_PY" -m harbor.cli.main ...` from
+`/home/robin_cline_bot/harbor`, and verify `inspect.getfile(...)` points under
+`$HARBOR_DIR/src/harbor`.
+
+Expected locations:
+
+- Jobs: `$HARBOR_DIR/jobs/<run_name>`
+- Logs: `$HARBOR_DIR/logs/<run_name>.log`
+- Manifests: `$HARBOR_DIR/jobs/<run_name>/manifest.json`
+- Local tarballs: `$HARBOR_DIR/local-tarballs/`
+
+Before making launch decisions, read live Harbor/adapter help:
+
+```bash
+cd "$HARBOR_DIR"
+PYTHONPATH="$HARBOR_DIR/src" "$HARBOR_PY" -m harbor.cli.main run --help
+PYTHONPATH="$HARBOR_DIR/src" "$HARBOR_PY" - <<'PY'
+from harbor.agents.installed.cline.cline import ClineCli
+import inspect
+print(inspect.getfile(ClineCli))
+print(inspect.signature(ClineCli.__init__))
+PY
+```
+
+## 1. Baseline Invariant Gate
+
+When a run will be compared to a prior run, do not start from a generic command.
+First inspect the exact baseline and copy every invariant except the intended
+variable under test.
+
+```bash
+cd "$HARBOR_DIR"
+BASELINE_RUN=<baseline_run_name>
+
+python3 -m json.tool "jobs/$BASELINE_RUN/manifest.json" | sed -n '1,220p'
+
+BASELINE_RUN="$BASELINE_RUN" python3 - <<'PY'
+import glob, json, os
+run = os.environ["BASELINE_RUN"]
+for p in glob.glob(f"jobs/{run}/*/result.json")[:5]:
+    r = json.load(open(p))
+    c = r.get("config", {})
+    print(p)
+    for k in [
+        "dataset", "model", "timeout_multiplier",
+        "agent_timeout_multiplier", "verifier_timeout_multiplier",
+        "agent_setup_timeout_multiplier",
+        "environment_build_timeout_multiplier",
+    ]:
+        print(k, c.get(k))
+    print("agent", c.get("agent", {}).get("name"))
+    print("agent.kwargs", c.get("agent", {}).get("kwargs"))
+    print("agent.env", c.get("agent", {}).get("env"))
+    print()
+PY
+```
+
+Must match unless intentionally changed:
+
+- dataset/version, task set, include/exclude filters, task limit
+- agent, model, provider route
+- environment and concurrency
+- `--timeout-multiplier` and specific timeout multipliers
+- setup retry kwargs and setup command timeout
+- reasoning flags
+- env-file usage and agent env shape
+- tracing/capture envs, if traces are part of the comparison
+
+For comparisons against `cline-provider-dsv4pro-full89-control-20260618T173324Z`,
+include:
+
+```bash
+--timeout-multiplier 2.0
+```
+
+That baseline recorded `config.timeout_multiplier=2.0` and
+`config.agent_setup_timeout_multiplier=2.0`. Omitting the flag defaults Harbor to
+`1.0` and creates false `AgentTimeoutError` regressions.
+
+Before the full run, print a short diff:
+
+```text
+Allowed differences: run_name, tarball path/SHA, source commit, intended model/provider if requested.
+Must match: dataset, task set, agent, provider route, concurrency, timeout multipliers,
+setup kwargs, env-file, CLINE_DATA_DIR, capture envs.
+```
+
+## Reasoning Controls
+
+Reasoning settings are part of the benchmark invariant. Do not compare runs
+unless reasoning/thinking state is intentionally matched and verified in the
+agent output.
+
+Defaults:
+
+- Cline: no Harbor reasoning kwarg means no reasoning/thinking effort flag is
+  passed; the Cline/model/provider default applies. Use the Harbor kwarg
+  `reasoning-effort` rather than hardcoding the raw Cline CLI flag. The current
+  live Harbor adapter renders this as `cline ... --thinking <effort>`.
+- OpenCode: no `opencode_config` reasoning option means the OpenCode/OpenRouter
+  default applies. Harbor always passes OpenCode `--thinking`, but that only
+  includes thinking blocks in JSON output; it does not enable or disable model
+  reasoning.
+- Pi: no `thinking` kwarg means no `--thinking` flag is passed; the Pi/model
+  provider default applies.
+
+Reasoning disabled/off:
+
+```bash
+# Cline
+--ak reasoning-effort=none
+
+# OpenCode through OpenRouter
+--ak 'opencode_config={"provider":{"openrouter":{"models":{"z-ai/glm-5.2":{"options":{"reasoning":{"effort":"none"}}}}}}}'
+
+# Pi
+--ak thinking=off
+```
+
+Reasoning enabled at medium:
+
+```bash
+# Cline
+--ak reasoning-effort=medium
+
+# OpenCode through OpenRouter
+--ak 'opencode_config={"provider":{"openrouter":{"models":{"z-ai/glm-5.2":{"options":{"reasoning":{"effort":"medium"}}}}}}}'
+
+# Pi
+--ak thinking=medium
+```
+
+Reasoning enabled without pinning medium:
+
+- Cline: pass one of `--ak reasoning-effort=low|medium|high|xhigh`.
+- OpenCode: pass `opencode_config` with
+  `options.reasoning.effort=low|medium|high` for the model under test.
+- Pi: pass one of `--ak thinking=minimal|low|medium|high|xhigh`.
+
+Verification:
+
+- Cline: inspect `trial.log` for the rendered `cline` command and confirm the
+  expected effort is present, currently `--thinking none|low|medium|high|xhigh`;
+  inspect `agent/cline.txt` and, when available, session/provider usage for
+  unexpected reasoning tokens.
+- OpenCode: inspect `agent/opencode.txt`; apples-to-apples disabled runs must
+  have no `"type":"reasoning"` events and zero
+  `step_finish.part.tokens.reasoning`.
+- Pi: inspect `agent/pi.txt`; confirm the trial command includes the expected
+  `--thinking <value>` and usage events are populated.
+
+## 2. Build Or Locate Cline CLI Tarball
+
+Harbor expects the generated Linux x64 platform package, not `npm pack` from
+`apps/cli` root. For Cline runs, build from the local machine's Cline checkout
+at `LOCAL_CLINE_DIR` (normally `/Users/robin/dev/cline`), not inside
+`HARBOR_DIR` on the Harbor VM.
+
+Build shape on the local machine:
+
+```bash
+cd "$LOCAL_CLINE_DIR"
+bun install --frozen-lockfile
+bun run build:sdk
+cd "$LOCAL_CLINE_DIR/apps/cli"
+bun script/build.ts --install-native-variants --skip-sdk-build
+cd "$LOCAL_CLINE_DIR/apps/cli/dist/cli-linux-x64"
+npm pack --pack-destination /tmp
+scp "/tmp/$TARBALL_FILE" "harbor:$HARBOR_DIR/local-tarballs/$TARBALL_FILE"
+```
+
+Validate on the Harbor VM before launch:
+
+```bash
+shasum "$TARBALL_DIR/$TARBALL_FILE"
+wc -c < "$TARBALL_DIR/$TARBALL_FILE"
+docker run --rm -v "$TARBALL_DIR:/tarballs:ro" node:22-bookworm \
+  bash -lc "npm install -g --ignore-scripts -- /tarballs/$TARBALL_FILE && cline --version"
+```
+
+For Modal, prefer local upload:
+
+```bash
+--ak tarball-path="$HARBOR_DIR/local-tarballs/$TARBALL_FILE"
+```
+
+Only use URL/S3 upload as a legacy fallback if local upload is unavailable. The
+URL kwarg spelling is `tarball_url`, not `tarball-url`.
+
+## 3. Smoke First
+
+Run one known-fast task with the same config shape as the full run.
+
+Known one-task smoke filter:
+
+```bash
+--include-task-name fix-git
+```
+
+Harbor does not accept `--task-name`.
+
+Do not launch the full run until smoke:
+
+- creates `agent/cline.txt`
+- exits with `__CLINE_EXIT=0`
+- passes verification
+- uses the expected provider/model command
+
+Known passing smoke:
+
+```text
+cline-provider-dsv4pro-main-3-0-29-fixgit-smoke-envfile-20260623T0142Z
+```
+
+## 4. Launch Current Cline CLI Modal Run
+
+Use `nohup` and background the job.
+
+Current Cline-provider Terminal-Bench shape:
+
+```bash
+cd "$HARBOR_DIR"
+mkdir -p logs
+
+RUN_NAME=<run_name>
+LOG_FILE="$HARBOR_DIR/logs/$RUN_NAME.log"
+
+nohup env PYTHONPATH="$HARBOR_DIR/src" "$HARBOR_PY" -m harbor.cli.main run \
   --job-name "$RUN_NAME" \
-  -d <dataset> \
-  -a <agent> \
-  -m <model> \
-  --env <modal|docker> \
-  -l <task_limit> -n <concurrency> \
-  --ak timeout=<timeout> \
-  --ak reasoning-effort=<reasoning_effort> \
-  --ak max-consecutive-mistakes=<max_consecutive_mistakes> \
-  --ak double-check-completion=<true|false> \
-  --ak tarball_url="<url>" \
+  -d terminal-bench@2.0 \
+  -a cline-cli \
+  -m cline:deepseek/deepseek-v4-pro \
+  --env modal \
+  --env-file ~/.env \
+  --timeout-multiplier 2.0 \
+  -l 89 -n 100 \
+  --ak setup-retries=3 \
+  --ak setup-retry-delay-sec=5 \
+  --ak setup-command-timeout-sec=240 \
+  --ak tarball-path="$HARBOR_DIR/local-tarballs/<tarball>.tgz" \
+  --ak reasoning-effort=none \
+  --ae CLINE_DATA_DIR=/logs/agent \
   > "$LOG_FILE" 2>&1 & echo $!
 ```
 
-**Key details:**
-- The `--ak` key for the tarball is **`tarball_url`** (underscore).
-- Capture the PID from `echo $!` for the manifest.
-- `--job-name` sets the job directory name (matches `$RUN_NAME`).
-- The harbor CLI command is `harbor run` (NOT `harbor bench run`).
+If traces/provider request capture are needed, add:
 
-## 6) Persist Run Manifest (Required)
-
-Write a JSON manifest immediately after launch. **Use the canonical template at [resources/manifest-template.json](resources/manifest-template.json) as the schema reference.** Every manifest must include all fields from the template; use `null` for unknown values rather than omitting keys.
-
-Path: `$HARBOR_DIR/jobs_sdk/manifests/<run_name>.json`
-
-Create the directory if it doesn't exist:
 ```bash
-mkdir -p "$HARBOR_DIR/jobs_sdk/manifests"
+--ae CLINE_CAPTURE_PROVIDER_REQUEST=full \
+--ae CLINE_CAPTURE_WIRE=true \
+--ae CLINE_CAPTURE_WIRE_RESPONSE=true \
+--ae CLINE_CAPTURE_MAX_PREVIEW_BYTES=5000000 \
+--ae CLINE_CAPTURE_CLEANUP=off \
+--ae WEAVE_CAPTURE_CONTENT=true
 ```
 
-Key rules:
-- **Always use `task_limit`** (not `limit`) for the `-l` flag value.
-- **Always include `requested_at` and `launched_at`** as separate ISO8601 timestamps.
-- **Always include `log_file`** with the absolute path.
-- **Always include `watcher`** with watch/cancel commands.
-- **Always include `status`** (initially `"launched"`).
-- **Always include `benchmark`** (`swebench` or `terminalbench`).
-- **Include `tarball.sdk_branch` and `tarball.sdk_commit`** when known (the SDK repo branch/commit the tarball was built from).
-- **Include `tarball.prs_included`** as an array of PR descriptions when the tarball includes unmerged PRs.
-- **Include `comparison_runs`** when this run is explicitly being compared against prior runs.
-- **Include `notes`** with a human-readable description of what this run is testing.
+Do not pass:
 
-See [resources/manifest-template.json](resources/manifest-template.json) for the full field reference.
+- `double-check-completion`
+- `max-consecutive-mistakes`
 
-## 7) Start Monitoring / Handoff
+These are stale for current `cline-cli`/Harbor and have caused failed launches.
 
-This skill bundles a robust watch script at [resources/watch-job.sh](resources/watch-job.sh).
+For Cline provider runs, always pass `--env-file ~/.env`; this is how
+`CLINE_API_KEY` reaches Modal. Unauthorized trials usually mean this was omitted.
 
-Copy it to the harbor directory and use it:
+Expected trial command shape:
 
 ```bash
-cp <skill_resources>/watch-job.sh "$HARBOR_DIR/scripts/"
+cline -P cline -k $API_KEY -m $MODELID --yolo --thinking none -- '<task>'
+```
+
+## 5. Manifest
+
+Write a manifest immediately after launch:
+
+```bash
+while [ ! -d "$HARBOR_DIR/jobs/$RUN_NAME" ]; do sleep 2; done
+MANIFEST_FILE="$HARBOR_DIR/jobs/$RUN_NAME/manifest.json"
+```
+
+Use [resources/manifest-template.json](resources/manifest-template.json) as the
+schema reference. Include:
+
+- run name, PID, log file, launch command
+- benchmark, dataset, task limit, concurrency
+- model/provider route, agent, environment
+- timeout multipliers
+- tarball path, SHA, size, source commit, included PRs
+- comparison baseline and invariant diff
+- notes describing the intended variable under test
+
+## 6. Watch
+
+Use the bundled watcher:
+
+```bash
+cp <skill_dir>/resources/watch-job.sh "$HARBOR_DIR/scripts/"
 chmod +x "$HARBOR_DIR/scripts/watch-job.sh"
+
+bash "$HARBOR_DIR/scripts/watch-job.sh" <run_name>
+watch -n 15 "bash $HARBOR_DIR/scripts/watch-job.sh <run_name>"
 ```
 
-Usage:
+Report to the user:
 
-```bash
-# One-shot status check
-bash "$HARBOR_DIR/scripts/watch-job.sh" <job_name_or_dir>
-
-# Auto-refresh every 15 seconds
-watch -n 15 "bash $HARBOR_DIR/scripts/watch-job.sh <job_name_or_dir>"
+```text
+Run: <run_name>
+PID: <pid>
+Log: <log_file>
+Manifest: <manifest_file>
+Watch: watch -n 15 'bash scripts/watch-job.sh <run_name>'
+Cancel: kill <pid>
 ```
 
-The script shows: active harbor PIDs, trial pass/fail/error/running counts, pass rate, score bounds, mean completion time, aggregate tool/command/turn metrics, and active + recent-finished trial samples.
+## 7. Post-Run Analysis
 
-If the repo already has `scripts/watch-swebench-job.sh` or `scripts/watch-hillclimb-jobs.sh`, those also work and can be used instead.
+For deeper failure or apples-to-apples analysis, use
+[resources/failure-analysis.md](resources/failure-analysis.md).
 
-## 8) Return a Short Launch Report
+Important current data note: some Cline runs no longer populate token/cost in
+`result.json`; extract metrics from `agent/sessions/*/*.messages.json` when
+needed.
 
-After launching, report to the user:
+Important OpenCode token note: never report OpenCode
+`agent_result.n_output_tokens` as comparable completion-side output by itself.
+Harbor stores OpenCode visible output there, while reasoning tokens live in
+`agent/opencode.txt` as `step_finish.part.tokens.reasoning`. Token reports must
+include `visible_output_tokens`, `reasoning_tokens`, and
+`output_plus_reasoning_tokens`; use
+`resources/extract-token-metrics.py` for CSV extraction.
 
-1. Benchmark + environment + model
-2. Job / run name
-3. PID + log file path
-4. Manifest path
-5. Commands to monitor and cancel:
-   ```
-   Monitor:  watch -n 15 'bash scripts/watch-job.sh <run_name>'
-   Tail log: tail -f <log_file>
-   Cancel:   kill <pid>
-   ```
+## Failure Policy
 
-## 9) Post-Run Failure Analysis
-
-When the user asks to analyze failures from a completed (or in-progress) run, follow these steps.
-
-### 9a) Get Run Status
-
-```bash
-cd "$HARBOR_DIR/jobs/<run_name>"
-TOTAL=$(ls -d */ | wc -l)
-COMPLETED=$(ls -d */result.json 2>/dev/null | wc -l)
-echo "Tasks: $COMPLETED/$TOTAL completed"
-```
-
-### 9b) Count Pass/Fail
-
-```python
-import json, os
-pass_count = fail_count = 0
-for d in sorted(os.listdir('.')):
-    rpath = os.path.join(d, 'result.json')
-    if not os.path.isfile(rpath): continue
-    with open(rpath) as f:
-        r = json.load(f)
-    if r['verifier_result']['rewards']['reward'] == 1.0:
-        pass_count += 1
-    else:
-        fail_count += 1
-print(f"Pass: {pass_count}, Fail: {fail_count}, Rate: {pass_count/(pass_count+fail_count)*100:.1f}%")
-```
-
-### 9c) Analyze Failures with Tool Counts
-
-**Critical: messages.json format.** The file at `<task_dir>/agent/api_history/<id>/<id>.messages.json` is a **dict** (not a list) with keys: `version`, `updated_at`, `messages`, `systemPrompt`. The actual message array is `data['messages']`.
-
-**Critical: glob path.** Messages files are nested two levels deep under `api_history/`:
-```
-<task_dir>/agent/api_history/<conversation_id>/<conversation_id>.messages.json
-```
-Use glob pattern: `os.path.join(d, 'agent', 'api_history', '*', '*.messages.json')`
-
-**Critical: tool names vary by SDK version.** The editor tool may be called `editor` (PR#42 anchor_line), `write_to_file`, `replace_in_file`, or `insert_content` depending on which SDK tarball was used. Always check for all variants:
-```python
-editor_calls = sum(tool_names.get(t, 0) for t in ['editor', 'write_to_file', 'replace_in_file', 'insert_content'])
-```
-
-**Failure categorization by editor call count:**
-- **0 editor calls** = "no-edit" — agent explored but never attempted a fix
-- **1-2 editor calls** = "minimal-edit" — attempted but wrong/incomplete fix
-- **3+ editor calls** = "wrong-fix" — substantial effort, wrong approach
-
-### 9d) Check for Known Bug Patterns
-
-**Dropped tool calls (PR#38 streaming bug):**
-```python
-# For each failed task, check tool_use/tool_result pairing
-tool_use_ids = []
-tool_result_ids = []
-for m in msgs:
-    content = m.get('content', [])
-    if isinstance(content, list):
-        for c in content:
-            if isinstance(c, dict):
-                if c.get('type') == 'tool_use':
-                    tool_use_ids.append(c.get('id'))
-                elif c.get('type') == 'tool_result':
-                    tool_result_ids.append(c.get('tool_use_id'))
-unmatched = set(tool_use_ids) - set(tool_result_ids)
-# If unmatched is non-empty, tool calls were silently dropped
-```
-
-**Negative line number / "Too small" errors:**
-```bash
-# Check cline.txt for Zod validation errors
-grep -rl "Too small" "$HARBOR_DIR/jobs/<run_name>/*/agent/cline.txt" | wc -l
-```
-
-### 9e) Compare Across Runs (Apples-to-Apples)
-
-When comparing two runs on the same task set, always compute on the **intersection** of completed tasks:
-
-```python
-common = set(baseline.keys()) & set(experiment.keys())
-both_pass = [t for t in common if baseline[t]==1.0 and experiment[t]==1.0]
-both_fail = [t for t in common if baseline[t]==0.0 and experiment[t]==0.0]
-regressions = [t for t in common if baseline[t]==1.0 and experiment[t]==0.0]
-improvements = [t for t in common if baseline[t]==0.0 and experiment[t]==1.0]
-```
-
-Key metrics to report:
-- **Apples-to-apples pass rate** on common tasks (not raw totals which may differ in completion)
-- **Regressions** (baseline pass → experiment fail) — these are the most important to flag
-- **Improvements** (baseline fail → experiment pass) — validates the changes
-- **Shared failures** — hard tasks that fail regardless of changes
-
-### 9f) Summary Template
-
-Present results in this format:
-
-```
-## Run Analysis: <run_name>
-- Status: X/Y completed, Z pass, W fail (rate%)
-- Known bugs: [list any detected: dropped calls, Too small, etc.]
-- Failure breakdown: A no-edit, B minimal-edit, C wrong-fix
-- vs Baseline (<baseline_name>): +/-N% on K common tasks, R regressions, I improvements
-```
-
-## 10) Failure Policy
-
-- If any critical step fails (build / upload / launch), **stop immediately** and report the exact command + stderr.
-- Do NOT claim launch success unless PID, log file, and manifest are all present and verified.
-- If the tarball HTTP server is needed for Docker and port 8199 is already in use, report that rather than silently skipping.
+- If build, validation, smoke, or launch fails, stop and report the exact command
+  and stderr.
+- Do not claim launch success unless PID, log file, and manifest are present.
+- Do not compare score/token deltas until baseline invariants have been checked.
