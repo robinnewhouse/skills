@@ -1,0 +1,6 @@
+interface:
+  display_name: "CLI Timeout Telemetry"
+  short_description: "Check SDK CLI timeout events in ClickHouse"
+  default_prompt: "Use $cli-timeout-telemetry to check whether SDK CLI shell timeout telemetry is landing this week."
+policy:
+  allow_implicit_invocation: true
