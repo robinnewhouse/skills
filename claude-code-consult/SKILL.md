@@ -18,7 +18,8 @@ Prefer a named, explicit session id instead of relying on `--continue`; it makes
 
 ```sh
 CLAUDE_SESSION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-claude -p --session-id "$CLAUDE_SESSION_ID" --permission-mode acceptEdits \
+claude -p --verbose --output-format=stream-json --include-partial-messages \
+  --session-id "$CLAUDE_SESSION_ID" --permission-mode acceptEdits \
   "You are consulting on this task. Read the prompt below, identify risks, and answer concisely.
 
 Task:
@@ -43,7 +44,8 @@ At minimum, save:
 Reuse the same session id for follow-up questions so Claude retains task context.
 
 ```sh
-claude -p --resume "$CLAUDE_SESSION_ID" --permission-mode acceptEdits \
+claude -p --verbose --output-format=stream-json --include-partial-messages \
+  --resume "$CLAUDE_SESSION_ID" --permission-mode acceptEdits \
   "Follow-up: review this new evidence and say whether it changes your prior recommendation.
 
 Evidence:
@@ -53,7 +55,8 @@ Evidence:
 If the command cannot resume by id, retry with:
 
 ```sh
-claude -p -r "$CLAUDE_SESSION_ID" --permission-mode acceptEdits "..."
+claude -p --verbose --output-format=stream-json --include-partial-messages \
+  -r "$CLAUDE_SESSION_ID" --permission-mode acceptEdits "..."
 ```
 
 ## Before Asking The User
@@ -139,14 +142,16 @@ For approval workflows, do not mark a phase or implementation as approved while 
 - Do not paste secrets, tokens, or private data unless the user explicitly authorized that exposure.
 - Use `--permission-mode acceptEdits` for code-review and approval workflows. Use a stricter mode if the user only wants read-only advice.
 - Do not let Claude make user-visible decisions unless the user authorized that role.
+- `--output-format=stream-json` requires `--verbose`. Use
+  `--include-partial-messages` so text deltas arrive before the final result.
 - If Claude output is long, summarize the actionable verdict and save only the important details in the task notes.
 
 ## Long-Running Consults
 
-Claude Code can take several minutes before producing any output, especially when
-it is inspecting a repo, reading multiple files, or performing a design/code
-review. Treat a quiet Claude process as normal unless there is concrete evidence
-that it is blocked.
+Claude Code can still take several minutes between stream events when it is
+inspecting a repo, reading multiple files, or performing a design/code review.
+Treat a quiet Claude process as normal unless there is concrete evidence that it
+is blocked.
 
 - Do not kill, retry, or replace a Claude request with a tighter prompt merely
   because there has been no output for 1-3 minutes.
