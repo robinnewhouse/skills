@@ -1,0 +1,4 @@
+interface:
+  display_name: "ASCII Progress Board"
+  short_description: "Draw honest multi-workstream status boards"
+  default_prompt: "Use $ascii-progress-board to show where this project really stands."

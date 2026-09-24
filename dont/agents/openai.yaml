@@ -1,0 +1,6 @@
+interface:
+  display_name: "Don’t"
+  short_description: "Store a durable preference in DONT.md"
+  default_prompt: "Use $dont to store this preference in DONT.md."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review PR Precedent"
+  short_description: "Mine human review patterns from related PRs"
+  default_prompt: "Use $review-pr-precedent to find related past PRs and compare their human review patterns with this implementation."

@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>System Atlas</title>
+  <style>
+    :root {
+      --paper: #FAF6F1;
+      --panel: #EDEDED;
+      --panel-2: #E2E2E2;
+      --ink: #181818;
+      --ink-2: #312E2E;
+      --line: #767270;
+      --orange: #FF3C00;
+      --live: #0f6b45;
+      --manual: #174ea6;
+      --runnable: #7a4e00;
+      --retired: #5f5b59;
+      --missing: #613f94;
+      --reported: #a64013;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--paper); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "ABC Diatype", "Diatype", system-ui, sans-serif;
+      line-height: 1.45;
+    }
+    a {
+      color: var(--ink);
+      text-decoration-color: var(--orange);
+      text-decoration-thickness: 2px;
+      text-underline-offset: 3px;
+    }
+    a:hover { color: var(--ink-2); }
+
+    .shell { max-width: 1480px; margin: 0 auto; padding: 0 32px 72px; }
+    header {
+      border-bottom: 2px solid var(--ink);
+      margin: 0 -32px 20px;
+      padding: 10px 32px 8px;
+    }
+    .masthead {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+      flex-wrap: wrap;
+      margin-bottom: 9px;
+    }
+    .mark { margin: 0; font-size: 15px; line-height: 1.2; letter-spacing: -.02em; }
+    .meta, .eyebrow, .source, .status, .tab, th {
+      font-family: "ABC Diatype", "Diatype", ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: .055em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .meta { color: var(--ink-2); }
+
+    nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .tab {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 7px 11px;
+      cursor: pointer;
+    }
+    .tab[aria-selected="true"], .tab:hover {
+      background: var(--orange);
+      border-color: var(--orange);
+      color: var(--ink);
+    }
+    .tab:focus-visible, .scroll-region:focus-visible, .diagram:focus-visible {
+      outline: 3px solid var(--ink);
+      outline-offset: 3px;
+    }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 6px; }
+    .status {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      width: max-content;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      padding: 4px 7px;
+    }
+    .status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .live { color: var(--live); }
+    .manual { color: var(--manual); }
+    .runnable { color: var(--runnable); }
+    .retired { color: var(--retired); }
+    .missing { color: var(--missing); }
+    .reported { color: var(--reported); }
+
+    .view { display: none; }
+    .view.active { display: block; }
+    .view-head {
+      display: grid;
+      grid-template-columns: 1fr .85fr;
+      gap: 22px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+    .view-head h2, .hero-title {
+      margin: 0 0 8px;
+      font-size: clamp(22px, 2.5vw, 32px);
+      line-height: 1.04;
+      letter-spacing: -.035em;
+    }
+    .hero-title { font-size: clamp(26px, 3.4vw, 40px); }
+    .view-note, .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--paper);
+    }
+    .view-note { background: var(--panel); }
+    .view-note p, .card p { margin: 0; }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.3fr .7fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .verdict {
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--ink);
+      color: var(--paper);
+    }
+    .verdict strong { display: block; margin: 6px 0 10px; font-size: 17px; line-height: 1.15; }
+    .verdict p { margin: 0; font-size: 13px; }
+
+    .grid { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .metric-number { font-size: 42px; line-height: .95; letter-spacing: -.05em; font-weight: 700; }
+    .flag {
+      margin-top: 16px;
+      border-left: 5px solid var(--orange);
+      border-radius: 0 12px 12px 0;
+      padding: 12px 15px;
+      background: var(--panel-2);
+    }
+    .flag strong { display: block; }
+    .source {
+      border-top: 1px solid var(--line);
+      margin-top: 16px;
+      padding-top: 10px;
+      color: var(--ink-2);
+    }
+
+    .diagram {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 8px;
+      background: var(--panel);
+    }
+    .diagram svg { display: block; width: 100%; height: auto; }
+    .svg-label { font-family: inherit; fill: var(--ink); font-size: 14px; font-weight: 700; }
+    .svg-body { font-family: inherit; fill: var(--ink-2); font-size: 11px; }
+    .svg-tiny {
+      font-family: ui-monospace, monospace;
+      fill: var(--ink-2);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .04em;
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { padding: 11px; background: var(--ink); color: var(--paper); text-align: left; }
+    td { padding: 11px; border: 1px solid var(--line); vertical-align: top; }
+    tr:nth-child(even) td { background: var(--panel); }
+    .stage { display: flex; gap: 4px; margin-bottom: 5px; }
+    .pip {
+      width: 15px;
+      height: 15px;
+      border: 1.5px solid var(--line);
+      border-radius: 4px;
+      background: var(--paper);
+    }
+    .pip.current { background: currentColor; border-color: currentColor; transform: scale(1.12); }
+
+    .ratio-track {
+      display: flex;
+      height: 38px;
+      border: 1px solid var(--ink);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .ratio-segment {
+      display: flex;
+      align-items: center;
+      padding: 0 11px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .ratio-good { background: var(--live); color: var(--paper); }
+    .ratio-other { background: var(--panel-2); color: var(--ink); }
+
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      @page { size: landscape; margin: 12mm; }
+      .view { display: block !important; page-break-before: always; }
+      .view:first-of-type { page-break-before: auto; }
+      nav { display: none; }
+      .source a[href]::after { content: " (" attr(href) ")"; font-weight: 400; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="masthead">
+        <h1 class="mark">[System] · current-state atlas</h1>
+        <div class="meta">[Date] · [Timezone] · read-only research</div>
+      </div>
+      <nav aria-label="Atlas views" role="tablist">
+        <button id="tab-overview" class="tab" role="tab" aria-controls="overview" data-view="overview" aria-selected="true" tabindex="0">00 · Synthesis</button>
+        <button id="tab-architecture" class="tab" role="tab" aria-controls="architecture" data-view="architecture" aria-selected="false" tabindex="-1">A · Architecture</button>
+        <button id="tab-maturity" class="tab" role="tab" aria-controls="maturity" data-view="maturity" aria-selected="false" tabindex="-1">B · Maturity</button>
+        <button id="tab-evidence" class="tab" role="tab" aria-controls="evidence" data-view="evidence" aria-selected="false" tabindex="-1">C · Evidence chain</button>
+      </nav>
+      <div class="legend" aria-label="Status legend">
+        <span class="status live">Live / automated</span>
+        <span class="status manual">Manual / operator-driven</span>
+        <span class="status runnable">Runnable / unverified</span>
+        <span class="status retired">Retired</span>
+        <span class="status missing">Missing</span>
+        <span class="status reported">Reported / not located</span>
+      </div>
+    </header>
+
+    <section id="overview" class="view active" role="tabpanel" aria-labelledby="tab-overview" data-title="00 · Synthesis">
+      <div class="hero">
+        <div>
+          <h2 class="hero-title">[One-sentence defensible description of the system]</h2>
+          <p>[Short explanation of what works, what humans do, and what remains unresolved.]</p>
+        </div>
+        <aside class="verdict">
+          <div class="eyebrow">Current maturity</div>
+          <strong>[Automated discovery. Human-driven action. Missing governance.]</strong>
+          <p>[Two or three source-backed facts. Keep uncertainty explicit.]</p>
+        </aside>
+      </div>
+      <div class="view-head">
+        <div><div class="eyebrow">Question answered</div><h2>What is running, and where does confidence stop?</h2></div>
+        <div class="view-note"><p><strong>How to read:</strong> Separate verified runtime from human practice, runnable code, retired experiments, and reported-only claims.</p></div>
+      </div>
+      <div class="grid grid-4">
+        <article class="card"><span class="status live">Verified cadence</span><div class="metric-number">Daily</div><p>[Plain-language cadence.]</p></article>
+        <article class="card"><span class="status live">Current population</span><div class="metric-number">30%</div><p>[Population and filter.]</p></article>
+        <article class="card"><span class="status live">Bounded check</span><div class="metric-number">51</div><p>[Label dynamic data as a lower bound or snapshot.]</p></article>
+        <article class="card"><span class="status manual">Historical impact</span><div class="metric-number">35+</div><p>[Verified historical outcome with denominator caveat.]</p></article>
+      </div>
+      <footer class="source">Sources: <a href="https://example.com">primary source</a>.</footer>
+    </section>
+
+    <section id="architecture" class="view" role="tabpanel" aria-labelledby="tab-architecture" data-title="A · Architecture">
+      <div class="view-head">
+        <div><div class="eyebrow">A · Architecture</div><h2>How the system moves from signal to outcome.</h2></div>
+        <div class="view-note"><p><strong>How to read:</strong> Solid green is automated. Blue is human-driven. Dashed routes are missing or reported-only.</p></div>
+      </div>
+      <div class="diagram scroll-region" role="region" aria-label="Scrollable system architecture" tabindex="0">
+        <svg viewBox="0 0 1280 430" role="img" aria-labelledby="architecture-title architecture-desc">
+          <title id="architecture-title">[System] architecture</title>
+          <desc id="architecture-desc">[Describe the nodes, primary flow, secondary evidence, gates, and missing route.]</desc>
+          <defs>
+            <marker id="live-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#0f6b45"/></marker>
+            <marker id="manual-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#174ea6"/></marker>
+          </defs>
+          <rect x="14" y="14" width="1252" height="402" rx="16" fill="#FAF6F1" stroke="#767270"/>
+          <text x="38" y="42" class="svg-tiny">PRIMARY FLOW</text>
+          <rect x="38" y="64" width="200" height="92" rx="12" fill="#EDEDED" stroke="#0f6b45" stroke-width="3"/>
+          <text x="56" y="96" class="svg-label">Source</text><text x="56" y="120" class="svg-body">[Source signal]</text>
+          <rect x="298" y="64" width="200" height="92" rx="12" fill="#EDEDED" stroke="#0f6b45" stroke-width="3"/>
+          <text x="316" y="96" class="svg-label">Automation</text><text x="316" y="120" class="svg-body">[Automated transform]</text>
+          <rect x="558" y="64" width="200" height="92" rx="12" fill="#EDEDED" stroke="#174ea6" stroke-width="3"/>
+          <text x="576" y="96" class="svg-label">Operator review</text><text x="576" y="120" class="svg-body">[Human investigation]</text>
+          <rect x="818" y="64" width="200" height="92" rx="12" fill="#FAF6F1" stroke="#FF3C00" stroke-width="3"/>
+          <text x="836" y="96" class="svg-label">Decision gate</text><text x="836" y="120" class="svg-body">[Procedural or enforced?]</text>
+          <rect x="1078" y="64" width="160" height="92" rx="12" fill="#EDEDED" stroke="#0f6b45" stroke-width="3"/>
+          <text x="1096" y="96" class="svg-label">Outcome</text><text x="1096" y="120" class="svg-body">[Observable result]</text>
+          <path d="M238 110 H290" stroke="#0f6b45" stroke-width="4" marker-end="url(#live-arrow)"/>
+          <path d="M498 110 H550" stroke="#174ea6" stroke-width="4" marker-end="url(#manual-arrow)"/>
+          <path d="M758 110 H810" stroke="#174ea6" stroke-width="4" marker-end="url(#manual-arrow)"/>
+          <path d="M1018 110 H1070" stroke="#174ea6" stroke-width="4" marker-end="url(#manual-arrow)"/>
+          <text x="38" y="220" class="svg-tiny">SECONDARY OR MISSING ROUTES</text>
+          <rect x="38" y="240" width="260" height="92" rx="12" fill="#EDEDED" stroke="#174ea6" stroke-width="2"/>
+          <text x="56" y="272" class="svg-label">Corroborating context</text><text x="56" y="296" class="svg-body">[Does not feed the automated core]</text>
+          <rect x="558" y="240" width="260" height="92" rx="12" fill="#FAF6F1" stroke="#613f94" stroke-width="3" stroke-dasharray="7 5"/>
+          <text x="576" y="272" class="svg-label">Missing wire</text><text x="576" y="296" class="svg-body">[What cannot yet be measured]</text>
+        </svg>
+      </div>
+      <footer class="source">Sources: <a href="https://example.com">architecture source</a>.</footer>
+    </section>
+
+    <section id="maturity" class="view" role="tabpanel" aria-labelledby="tab-maturity" data-title="B · Maturity">
+      <div class="view-head">
+        <div><div class="eyebrow">B · Maturity</div><h2>Where capabilities sit on a defined ordinal scale.</h2></div>
+        <div class="view-note"><p><strong>How to read:</strong> Use a named stage, never an invented percentage.</p></div>
+      </div>
+      <div class="scroll-region" role="region" aria-label="Scrollable maturity table" tabindex="0" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Capability</th><th>Status</th><th>Stage</th><th>Evidence</th><th>Next gap</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>[Capability]</td><td><span class="status live">Live</span></td>
+              <td class="live"><div class="stage" aria-label="Stage 4 of 5"><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip current"></i><i class="pip"></i></div><strong>4 · Automated</strong></td>
+              <td>[Verified evidence]</td><td>[What blocks governance]</td>
+            </tr>
+            <tr>
+              <td>[Capability]</td><td><span class="status missing">Missing</span></td>
+              <td class="missing"><div class="stage" aria-label="Stage 1 of 5"><i class="pip current"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i><i class="pip"></i></div><strong>1 · Absent</strong></td>
+              <td>[Available primitives]</td><td>[Missing linkage or ownership]</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="evidence" class="view" role="tabpanel" aria-labelledby="tab-evidence" data-title="C · Evidence chain">
+      <div class="view-head">
+        <div><div class="eyebrow">C · Evidence chain</div><h2>Where the measurement chain breaks.</h2></div>
+        <div class="view-note"><p><strong>How to read:</strong> Do not use one scale for different units or populations. Show missing joins explicitly. Only use bars where a real denominator exists.</p></div>
+      </div>
+      <div class="grid grid-2">
+        <article class="card">
+          <h3>Real ratio</h3>
+          <div class="ratio-track">
+            <div class="ratio-segment ratio-good" style="width:52%">11 merged · 52%</div>
+            <div class="ratio-segment ratio-other" style="width:48%">10 closed</div>
+          </div>
+          <p>Use only when every item in the denominator has a known final state.</p>
+        </article>
+        <article class="card">
+          <h3>Count without denominator</h3>
+          <div class="metric-number">24 merged</div>
+          <p>Do not draw a 100% bar when the total candidate population is unknown.</p>
+        </article>
+      </div>
+      <div class="flag"><strong>Missing measurement:</strong> [Describe the absent join, disposition, or outcome record.]</div>
+    </section>
+  </main>
+
+  <script>
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    const views = [...document.querySelectorAll('[role="tabpanel"]')];
+
+    function selectView(id) {
+      const selected = views.some(view => view.id === id) ? id : views[0].id;
+      views.forEach(view => view.classList.toggle('active', view.id === selected));
+      tabs.forEach(tab => {
+        const active = tab.dataset.view === selected;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+      });
+      history.replaceState(null, '', '#' + selected);
+      document.title = 'System Atlas · ' + document.getElementById(selected).dataset.title;
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => selectView(tab.dataset.view));
+      tab.addEventListener('keydown', event => {
+        let next = index;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        tabs[next].focus();
+        selectView(tabs[next].dataset.view);
+      });
+    });
+
+    selectView(location.hash.slice(1) || views[0].id);
+    window.addEventListener('hashchange', () => selectView(location.hash.slice(1)));
+  </script>
+</body>
+</html>
