@@ -1,4 +1,0 @@
-interface:
-  display_name: "Explainer Video"
-  short_description: "Create source-faithful narrated explainer videos"
-  default_prompt: "Use $explainer-video to create a clear video explaining this subject, with editable source and verified output."

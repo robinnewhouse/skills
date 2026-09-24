@@ -1,9 +1,9 @@
 ---
-name: explainer-video
+name: animated-explainer
 description: Create a rendered explainer video with editable animation, narration or deliberate silent pacing, captions, and source notes. Use when asked to make a video explaining code, runtime behavior, architecture, a technical concept, or another subject. Also use for narrated code walkthroughs and educational animations. Do not use for an interactive HTML explainer, slide deck, or video script alone unless the user explicitly requests this workflow.
 ---
 
-# Explainer video
+# Animated explainer
 
 Make the mechanism visible. Deliver a playable video and the editable project needed to revise it.
 
