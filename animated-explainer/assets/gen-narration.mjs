@@ -5,17 +5,20 @@
 // Writes public/audio/*.wav, out/captions.srt (SRT env), and src/timeline.json with measured, frame-exact cues:
 //   {fps, total, scenes: [{id, start, end, cues: [{id, text, file, start, end}]}]}
 //
-// Providers (TTS env var, default: first one whose credentials are present):
-//   gemini  GEMINI_API_KEY          Gemini API, model GEMINI_TTS_MODEL (default gemini-3.8-flash-tts)
+// Needs Node 18+ (global fetch), ffmpeg and ffprobe; checked before any TTS request.
+//
+// Providers (TTS env var, default: first one whose credentials are present, login-based first):
 //   vertex  VERTEX_PROJECT + gcloud Vertex AI generateContent with your gcloud login, model VERTEX_TTS_MODEL
 //                                   (default gemini-3.1-flash-tts-preview), location VERTEX_LOCATION (global)
 //   gcloud  GCP_PROJECT + gcloud    Cloud Text-to-Speech Gemini-TTS, model GCLOUD_TTS_MODEL
 //                                   (default gemini-3.1-flash-tts-preview); needs texttospeech API enabled
-//   say     macOS                   built-in voice; last-resort fallback, sounds robotic
+//   gemini  GEMINI_API_KEY          Gemini API, model GEMINI_TTS_MODEL (default gemini-3.8-flash-tts)
+//   say     macOS only              built-in voice; last-resort fallback, sounds robotic
+// With no credentials and no `say`, exits with an error so the caller can report narration as blocked.
 //
-// Other env: VOICE (Kore), STYLE (delivery prompt), FPS (30), GAP (0.3s between lines),
+// Other env: VOICE (Kore), STYLE (delivery prompt), TTS_LANGUAGE (en-US, BCP-47; used by gcloud), RATE (say only), FPS (30), GAP (0.3s between lines),
 // LEAD (0.4s scene lead-in), TAIL (0.9s scene tail), END_HOLD (2s still hold after the last line). Clips are cached by a hash of
-// provider+model+voice+style+text, so editing one line regenerates only that clip.
+// provider+model+voice+style+language+rate+text, so editing one line regenerates only that clip.
 // Leading/trailing silence is trimmed so cue timings reflect the actual speech.
 import {execFileSync} from 'node:child_process';
 import crypto from 'node:crypto';
@@ -23,7 +26,14 @@ import fs from 'node:fs';
 
 const env = process.env;
 const FPS = Number(env.FPS ?? 30), GAP = Number(env.GAP ?? 0.3), LEAD = Number(env.LEAD ?? 0.4), TAIL = Number(env.TAIL ?? 0.9), END_HOLD = Number(env.END_HOLD ?? 2);
-const PROVIDER = env.TTS ?? (env.GEMINI_API_KEY ? 'gemini' : env.VERTEX_PROJECT ? 'vertex' : env.GCP_PROJECT ? 'gcloud' : 'say');
+const has = (cmd) => { try { execFileSync('which', [cmd], {stdio: 'ignore'}); return true; } catch { return false; } };
+const fail = (msg) => { console.error(msg); process.exit(1); };
+if (typeof fetch !== 'function') fail('Node 18+ is required (global fetch).');
+for (const tool of ['ffmpeg', 'ffprobe']) if (!has(tool)) fail(`${tool} is required; install FFmpeg first.`);
+const PROVIDER = env.TTS ?? (env.VERTEX_PROJECT ? 'vertex' : env.GCP_PROJECT ? 'gcloud' : env.GEMINI_API_KEY ? 'gemini'
+  : process.platform === 'darwin' && has('say') ? 'say' : null);
+if (!PROVIDER) fail('No TTS provider: set VERTEX_PROJECT, GCP_PROJECT or GEMINI_API_KEY (or run on macOS for a `say` draft). Narration is blocked.');
+const LANGUAGE = env.TTS_LANGUAGE ?? 'en-US', RATE = env.RATE ?? '188';
 const VOICE = env.VOICE ?? (PROVIDER === 'say' ? 'Samantha' : 'Kore');
 const STYLE = env.STYLE ?? 'warm, clear, calm explainer narrator, natural conversational pace, confident and not salesy';
 const MODEL = PROVIDER === 'gemini' ? (env.GEMINI_TTS_MODEL ?? 'gemini-3.8-flash-tts')
@@ -31,7 +41,9 @@ const MODEL = PROVIDER === 'gemini' ? (env.GEMINI_TTS_MODEL ?? 'gemini-3.8-flash
   : PROVIDER === 'gcloud' ? (env.GCLOUD_TTS_MODEL ?? 'gemini-3.1-flash-tts-preview') : 'say';
 // Optional pronunciation map: src/pronounce.json {"GPT": "G P T"} — applied to TTS text only, never captions.
 const PRON = fs.existsSync('src/pronounce.json') ? JSON.parse(fs.readFileSync('src/pronounce.json', 'utf8')) : {};
-const ttsText = (t) => Object.entries(PRON).reduce((s, [k, v]) => s.replace(new RegExp(`\\b${k}\\b`, 'g'), v), t);
+// Keys match literally (so "C++" or "foo.bar" work) and only where not touching other word characters.
+const escape = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const ttsText = (t) => Object.entries(PRON).reduce((s, [k, v]) => s.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escape(k)}(?![\\p{L}\\p{N}_])`, 'gu'), v), t);
 
 const run = (cmd, args) => execFileSync(cmd, args, {stdio: ['ignore', 'pipe', 'pipe']});
 const duration = (f) => parseFloat(run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f]).toString());
@@ -89,13 +101,13 @@ async function synth(text) {
     const json = await post('https://texttospeech.googleapis.com/v1/text:synthesize',
       {Authorization: `Bearer ${token}`, 'x-goog-user-project': env.GCP_PROJECT}, {
         input: {prompt: STYLE, text},
-        voice: {languageCode: 'en-us', name: VOICE, model_name: MODEL},
+        voice: {languageCode: LANGUAGE, name: VOICE, model_name: MODEL},
         audioConfig: {audioEncoding: 'LINEAR16', sampleRateHertz: 24000},
       });
     return Buffer.from(json.audioContent, 'base64');
   }
   const tmp = '/tmp/_narration.aiff';
-  run('say', ['-v', VOICE, '-r', env.RATE ?? '188', '-o', tmp, text]);
+  run('say', ['-v', VOICE, '-r', RATE, '-o', tmp, text]);
   return fs.readFileSync(tmp);
 }
 
@@ -121,7 +133,7 @@ for (const s of script) {
   const start = t, cues = [];
   t += LEAD;
   for (const [i, line] of s.lines.entries()) {
-    const h = crypto.createHash('sha1').update([PROVIDER, MODEL, VOICE, STYLE, ttsText(line)].join('|')).digest('hex').slice(0, 10);
+    const h = crypto.createHash('sha1').update([PROVIDER, MODEL, VOICE, STYLE, LANGUAGE, PROVIDER === 'say' ? RATE : '', ttsText(line)].join('|')).digest('hex').slice(0, 10);
     const file = `audio/${s.id}_${i}_${h}.wav`, out = 'public/' + file;
     if (!fs.existsSync(out)) { process.stdout.write(`  ${s.id}.${i} … `); await clip(line, out); console.log('ok'); }
     const d = duration(out);
@@ -142,6 +154,8 @@ const SRT = env.SRT ?? 'out/captions.srt';
 const stamp = (fr) => { const ms = Math.round((fr / FPS) * 1000), p = (n, w = 2) => String(n).padStart(w, '0');
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`; };
 fs.mkdirSync(SRT.split('/').slice(0, -1).join('/') || '.', {recursive: true});
-fs.writeFileSync(SRT, scenes.flatMap((s) => s.cues).map((c, i) => `${i + 1}\n${stamp(c.start)} --> ${stamp(c.end + 8)}\n${c.text}\n`).join('\n'));
+// Hold each caption ~0.27s past its audio for readability, but never into the next cue.
+const allCues = scenes.flatMap((s) => s.cues), HOLD = Math.round(0.27 * FPS);
+fs.writeFileSync(SRT, allCues.map((c, i) => `${i + 1}\n${stamp(c.start)} --> ${stamp(Math.min(c.end + HOLD, allCues[i + 1]?.start ?? Infinity))}\n${c.text}\n`).join('\n'));
 console.log(`total ${t.toFixed(1)}s  captions → ${SRT}`);
 for (const s of scenes) console.log(`${s.id} @${(s.start / FPS).toFixed(1)}s  ${((s.end - s.start) / FPS).toFixed(1)}s`);

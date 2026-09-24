@@ -16,28 +16,29 @@ Generate speech in coherent semantic units, often a paragraph or scene, rather t
 
 ### Default voice: Gemini TTS, one clip per line
 
-Use `assets/gen-narration.mjs`. Prefer `vertex` or `gcloud` login over creating personal API keys. Copy it to the project's `scripts/`, write `src/script.json` as `[{id, lines: [...]}]`, and run it. It makes one clip per narration line, trims silence at both ends, measures each clip, and writes `src/timeline.json` with frame-exact cue start/end per line. In Remotion, place each clip in a `<Sequence from={cue.start}>` with `<Audio>`, drive highlights from the same cues, and write the SRT from them (captions are a track, not rendered). Splicing is exact because each line is its own measured file. No forced alignment needed.
+Use `assets/gen-narration.mjs`. It needs Node 18+, `ffmpeg` and `ffprobe`, and checks for them before spending any TTS quota. Prefer `vertex` or `gcloud` login over creating personal API keys. Copy it to the project's `scripts/`, write `src/script.json` as `[{id, lines: [...]}]`, and run it. It makes one clip per narration line, trims silence at both ends, measures each clip, and writes `src/timeline.json` with frame-exact cue start/end per line. In Remotion, place each clip in a `<Sequence from={cue.start}>` with `<Audio>`, drive highlights from the same cues, and write the SRT from them (captions are a track, not rendered). Splicing is exact because each line is its own measured file. No forced alignment needed.
 
-Providers, picked by which credentials are present:
+Providers, picked by which credentials are present, in this order (override with `TTS=`):
 
 | `TTS=` | Needs | Model (default) |
 |---|---|---|
 | `vertex` | `VERTEX_PROJECT` plus `gcloud` login | `gemini-3.1-flash-tts-preview` (newest on Vertex as of 2026-09) |
-| `gemini` | `GEMINI_API_KEY` (Google AI Studio) | `gemini-3.8-flash-tts`, Interactions API |
 | `gcloud` | `GCP_PROJECT` with the Cloud Text-to-Speech API enabled, plus `gcloud` login | `gemini-3.1-flash-tts-preview` |
-| `say` | macOS | built-in voice. Robotic: use only for timing drafts |
+| `gemini` | `GEMINI_API_KEY` (Google AI Studio) | `gemini-3.8-flash-tts`, Interactions API |
+| `say` | macOS only | built-in voice. Robotic: use only for timing drafts |
 
 - Pick one voice (`VOICE`, default `Kore`; `Charon` and `Puck` also work well) and one `STYLE` delivery prompt for the whole video, so clips sound like one take.
 - Put pronunciation fixes in `src/pronounce.json`. They apply to the speech text only, never to captions.
-- Clips are cached by a hash of provider, model, voice, style and text, so changing one line regenerates one clip.
+- For non-English narration set `TTS_LANGUAGE` (BCP-47, e.g. `fr-FR`); the `gcloud` provider sends it as the voice language.
+- Clips are cached by a hash of provider, model, voice, style, language, `say` rate and text, so changing one line regenerates one clip.
 - Gemini TTS models are preview. If a model ID is rejected, check the current list at ai.google.dev/gemini-api/docs/speech-generation and pass it as `GEMINI_TTS_MODEL`.
 - In zsh, write `${MODEL}:generateContent`, not `$MODEL:generateContent`: zsh reads `:g` as a modifier and the URL 404s with an HTML page.
 - Gemini narrates at about 145 words per minute, slower than `say`. Tie reveals to phrases inside a cue (character position × cue length), not fixed frame offsets, so a voice change doesn't break sync.
-- Never write the key into the project. If no provider is available, generate a `say` draft for timing and report that the final voice is blocked on a key.
+- Never write the key into the project. If no provider is available, the script generates a `say` draft on macOS; elsewhere it exits with an error. Either way, finish the work that doesn't depend on narration and report that the final voice is blocked on credentials.
 
 Measure the generated files. Use timestamps or forced alignment when available, then inspect the alignment against the audio. Correct transcription errors without replacing words actually spoken with an outdated draft. Use phrase-level cues when word-level alignment is unavailable and report any timing uncertainty.
 
-Captions should use natural phrase boundaries, readable line breaks, sufficient contrast, and a reserved safe region. Test long identifiers, Unicode, mathematical notation, and the target language's glyphs. Deliver captions as a subtitle track, never drawn into the frames: write an SRT from the cue timeline and add it to the MP4 as a toggleable track (`ffmpeg -i raw.mp4 -i captions.srt -map 0 -map 1 -c copy -c:s mov_text -metadata:s:s:0 language=eng final.mp4`). Also ship the SRT beside the video. Burn captions in only when the user explicitly asks.
+Captions should use natural phrase boundaries, readable line breaks, sufficient contrast, and a reserved safe region. Test long identifiers, Unicode, mathematical notation, and the target language's glyphs. Deliver captions as a subtitle track, never drawn into the frames: write an SRT from the cue timeline and add it to the MP4 as a toggleable track (`ffmpeg -i raw.mp4 -i captions.srt -map 0 -map 1 -c copy -c:s mov_text -metadata:s:s:0 language=eng final.mp4`, replacing `eng` with the ISO 639-2 code of the caption language, e.g. `fra`, `jpn`). Also ship the SRT beside the video. Burn captions in only when the user explicitly asks.
 
 Music is optional. If used, keep speech clear through suitable levels and ducking, and inspect for clipping or distracting changes. Leave enough time for the last spoken word and the final visual result.
 
